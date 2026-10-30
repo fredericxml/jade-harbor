@@ -37,10 +37,10 @@ async function ready() {
   );
 }
 async function create(name, seed) {
-  await page.getByRole("button", { name: "Create a world" }).click();
+  await page.locator('[data-action="new"]').click();
   await page.locator("#world-name").fill(name);
   await page.locator("#world-seed").fill(seed);
-  await page.getByRole("button", { name: "Enter your world" }).click();
+  await page.locator('[data-action="create"]').click();
   await page.waitForFunction(() => window.__game?.active);
   await page.evaluate(() => {
     const g = window.__game;
@@ -76,7 +76,7 @@ async function fixture(position, pitch = -0.9, flying = false) {
 async function menu() {
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "Save & return home" }).click();
-  await page.getByRole("button", { name: "Create a world" }).waitFor();
+  await page.locator('[data-action="new"]').waitFor();
 }
 async function disk(id) {
   return page.evaluate(async (id) => {
@@ -209,20 +209,19 @@ try {
   await page.mouse.up();
   passed("real mouse mines a sculpture voxel");
   const fixtures = await page.evaluate(async () => {
-    const g = window.__game,
-      { getCityPlan } = await import("/src/world/city/plan.ts"),
-      { seedNumber } = await import("/src/world/noise.ts");
-    const house = getCityPlan(seedNumber(g.meta.seed)).structures.find(
+    const g = window.__game;
+    const house = g.world.cityPlan.structures.find(
       (s) => s.kind === "shophouse",
     );
+    const houseY = (house.baseY ?? 20) + 3;
     const edits = [
-      { x: house.x1, y: 23, z: house.z1, value: 0 },
+      { x: house.x1, y: houseY, z: house.z1, value: 0 },
       { x: 7, y: 24, z: -43, value: 48 },
       { x: -16, y: 25, z: -1, value: 53 },
       { x: -17, y: 25, z: -1, value: 9 },
     ];
     g.world.ensure(Math.floor(house.x1 / 16), Math.floor(house.z1 / 16), true);
-    if (!g.world.get(house.x1, 23, house.z1))
+    if (!g.world.get(house.x1, houseY, house.z1))
       throw Error("house fixture missing");
     for (const e of edits) g.world.set(e.x, e.y, e.z, e.value);
     return edits;

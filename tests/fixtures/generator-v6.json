@@ -1,0 +1,242 @@
+[
+  {
+    "seed": "jade-harbor",
+    "cx": 0,
+    "cz": -27,
+    "sha256": "0e54042f05b9bdde5b178669834052e30b75749c366a0bf2d6f524a5084caf9e"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": 0,
+    "cz": -26,
+    "sha256": "b0c0585da85c0fc7d9be611dacc806384ff279d294f63ab5744ee81cc793ed04"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": 10,
+    "cz": -40,
+    "sha256": "9e7cd3cb249bf1d07ec397a6305545169912b2463942919a01306f113df69d14"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": -10,
+    "cz": -37,
+    "sha256": "ad61ea261c989848f8e48ba0fb5543e19842e41a38492534b97e296c5e006c0d"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": -34,
+    "cz": 10,
+    "sha256": "90331b00cf89cc0deb35cbafb716e73395da7795d257bb36a3fb1bf46ecf3ffa"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": -30,
+    "cz": 10,
+    "sha256": "f7bff342da2bd7fb9b795ed3eedee6cf9221512ca67debdd48a6802d91c5c926"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": 12,
+    "cz": 21,
+    "sha256": "a084e63223171fb2b0a2ca2d758df63728183292e1b85536c36aead03aed0aec"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": 12,
+    "cz": 21,
+    "sha256": "a084e63223171fb2b0a2ca2d758df63728183292e1b85536c36aead03aed0aec"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": -42,
+    "cz": -16,
+    "sha256": "a90ff176bf70c60749d78bc6fa9ab756c1eca18581f33eeb01e2e961c1f1ee17"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": -42,
+    "cz": -15,
+    "sha256": "94504e5079c98a67a300de3a5f13f13521356461d1f30f07024b7b269f12162c"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": 38,
+    "cz": -27,
+    "sha256": "6eba29182fa087868f3e6c6f157676fcea8da32e352afdf17dcf19305a90d982"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": 38,
+    "cz": -27,
+    "sha256": "6eba29182fa087868f3e6c6f157676fcea8da32e352afdf17dcf19305a90d982"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": -46,
+    "cz": -16,
+    "sha256": "46e42e17d428f9ddf250dfb2fbc9d167925ad6652528b0706d5a4f5c5896df4b"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": -46,
+    "cz": -16,
+    "sha256": "46e42e17d428f9ddf250dfb2fbc9d167925ad6652528b0706d5a4f5c5896df4b"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": -42,
+    "cz": -21,
+    "sha256": "91498bf8a859e13fad6e9762777e599d69e849ea32613c613d64f7932121bf2f"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": -42,
+    "cz": -20,
+    "sha256": "71550726469757043c1f0c66cf20077fe826fd742f04d494d702a6a50eaf1a6c"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": 0,
+    "cz": -3,
+    "sha256": "c6da34b2396ce55877228d04e2b45555f81f2718b3446f843dfa8a50fe101da6"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": 0,
+    "cz": 0,
+    "sha256": "24070bf58f08429d0ed67ffa2f93dced843d91bd3bed1ee34923a7707ffa7fee"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": -12,
+    "cz": -12,
+    "sha256": "2785c511e628511664f59494d991f2bf37f66880bf4cd6947f1160cc6a641dd0"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": 13,
+    "cz": 22,
+    "sha256": "fe7019b3cfc8dea82be97c1bc59c122e9d35edcc024df5982a811f653e0ea827"
+  },
+  {
+    "seed": "different-city",
+    "cx": 0,
+    "cz": -27,
+    "sha256": "aa78363bc23867544b1cbc58344904b4dc52d934c4644e223427ba485ce94168"
+  },
+  {
+    "seed": "different-city",
+    "cx": 0,
+    "cz": -26,
+    "sha256": "0e2ec3bbf5259537d50557c256e2a5ee2ff7c09c1a3c2d511aef2ab9d95d2f88"
+  },
+  {
+    "seed": "different-city",
+    "cx": 10,
+    "cz": -39,
+    "sha256": "e3e60cbc1c878abacdfbb4661c609ba176a18e0798bcc7a44b00b46e11f105ac"
+  },
+  {
+    "seed": "different-city",
+    "cx": -10,
+    "cz": -36,
+    "sha256": "866f170302bc293a2e4409d67f6173a6be8973087272fe4e8e0fcec1866918d6"
+  },
+  {
+    "seed": "different-city",
+    "cx": -34,
+    "cz": 10,
+    "sha256": "22ed3489131310c34b15f25d1e3f75a66f749edf7c38b558e47d113dd5df3714"
+  },
+  {
+    "seed": "different-city",
+    "cx": -30,
+    "cz": 10,
+    "sha256": "e35a1909449ade41f8735fa0628e9aa8c97739fb4236187953e2d7c37bcde296"
+  },
+  {
+    "seed": "different-city",
+    "cx": 12,
+    "cz": 21,
+    "sha256": "ca09a43e07ab04606055c806b8b912b76bf5c7c99ccb17189618b9c4c6f3db61"
+  },
+  {
+    "seed": "different-city",
+    "cx": 12,
+    "cz": 21,
+    "sha256": "ca09a43e07ab04606055c806b8b912b76bf5c7c99ccb17189618b9c4c6f3db61"
+  },
+  {
+    "seed": "different-city",
+    "cx": -42,
+    "cz": -16,
+    "sha256": "6a674b617e5f06724c0ffb5f988a1a6e817403182e27864f24e1e927a8d24b83"
+  },
+  {
+    "seed": "different-city",
+    "cx": -42,
+    "cz": -15,
+    "sha256": "1cdaafbd223d4125eda23cb27165aa3e5cc1c41efc55d0454662fea6e28d7437"
+  },
+  {
+    "seed": "different-city",
+    "cx": 38,
+    "cz": -27,
+    "sha256": "bb82252bf3cf4233693eff9604edf54eec2db7184b6634f1d058578375295fd3"
+  },
+  {
+    "seed": "different-city",
+    "cx": 38,
+    "cz": -27,
+    "sha256": "bb82252bf3cf4233693eff9604edf54eec2db7184b6634f1d058578375295fd3"
+  },
+  {
+    "seed": "different-city",
+    "cx": -46,
+    "cz": -16,
+    "sha256": "63e0136853bdbff444174373a234551b4b4cd8a95b6e9fd20ff5d71ad96118b1"
+  },
+  {
+    "seed": "different-city",
+    "cx": -46,
+    "cz": -16,
+    "sha256": "63e0136853bdbff444174373a234551b4b4cd8a95b6e9fd20ff5d71ad96118b1"
+  },
+  {
+    "seed": "different-city",
+    "cx": -42,
+    "cz": -21,
+    "sha256": "1d4009c0cb7388a12258a53b8762bdac66146c87029c594e52a1589976e44e8d"
+  },
+  {
+    "seed": "different-city",
+    "cx": -42,
+    "cz": -20,
+    "sha256": "8a97fec8baf308e69c094313d9d1797c68eb46f09a36add2480fb13f79043bbc"
+  },
+  {
+    "seed": "different-city",
+    "cx": 0,
+    "cz": -3,
+    "sha256": "3b7a77b7abda9e68f367621d52d359f69346fd37fe2908a6870113f6cd32bdd3"
+  },
+  {
+    "seed": "different-city",
+    "cx": 0,
+    "cz": 0,
+    "sha256": "b8abced4795675ee5fddd717dcc680e925dd06dd00ee8270d612c1d6a2b614ea"
+  },
+  {
+    "seed": "different-city",
+    "cx": -12,
+    "cz": -12,
+    "sha256": "61322b77312beea967fff35f6793f982c430a3948f0f85b35b37f62547062901"
+  },
+  {
+    "seed": "different-city",
+    "cx": 13,
+    "cz": 22,
+    "sha256": "70ab8c8dc6f9aa39bf2e12c7fd8f5ada9e2aad352d0cd0cefa7353521be24247"
+  }
+]

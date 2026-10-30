@@ -29,8 +29,8 @@ try {
     errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto("http://127.0.0.1:4178");
-  await page.getByRole("button", { name: "Create a world" }).click();
-  await page.getByRole("button", { name: "Enter your world" }).click();
+  await page.locator('[data-action="new"]').click();
+  await page.locator('[data-action="create"]').click();
   await page.waitForFunction(
     () => window.__game?.active && window.__game.input.locked,
   );

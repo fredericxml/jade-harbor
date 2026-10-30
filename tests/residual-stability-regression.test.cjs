@@ -226,8 +226,7 @@ test('applySettings sanitizes corrupt persisted numeric values', () => {
   game.applySettings();
   assert.deepEqual(game.settings, { fov: 75, distance: 5, simulationDistance: 4, sensitivity: 4, volume: 30 });
   assert.equal(game.view.camera.fov, 75);
-  assert.equal(game.view.scene.fog.near, 50);
-  assert.equal(game.view.scene.fog.far, 120);
+  assert.equal(game.view.distance, 5, "validated distance is passed to the atmosphere owner");
   assert.equal(game.audio.volume, 0.3);
   assert.equal(projectionUpdates, 1);
 });

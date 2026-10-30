@@ -20,7 +20,7 @@ function setup(){
   chunks.set(`${cx},${cz}`,{cx,cz});for(let sy=-2;sy<=2;sy++)dirty.add(`${cx},${sy},${cz}`);
  }
  dirty.add('99,0,99');dirty.add('0,19,0');
- return {world:{dirty,chunks},view:Object.assign(new (class{})(),{camera:{position:{x:8,y:8,z:8}},lastSectionY:0,verticalRadius:64,deferred:new Set(),sections:new Map(),groups:new Map(),scene:{add(){}},materials:[{}, {}, {}],metrics:{add(){}},removeSection(){}})};
+ return {world:{dirty,chunks},view:Object.assign(new (class{})(),{camera:{position:{x:8,y:8,z:8}},lastSectionY:0,verticalRadius:64,deferred:new Set(),sections:new Map(),meshed:new Set(),meshRevision:0,groups:new Map(),scene:{add(){}},materials:[{}, {}, {}],metrics:{add(){}},removeSection(){}})};
 }
 for(const [name,Cl] of [['source',Source]]){
  const {world,view}=setup();recorded=[];Cl.prototype.rebuild.call(view,world,3);

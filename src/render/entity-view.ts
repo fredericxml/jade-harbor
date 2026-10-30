@@ -2,12 +2,27 @@ import * as THREE from "three";
 import { Entities, Entity } from "../game/entities";
 import { PROFESSIONS } from "../game/professions";
 import { item } from "../game/items";
+import type { TaskChain } from "../game/city-life/purpose";
+import type { ResidentState } from "../game/city-life/runtime";
+import { identityHash } from "../game/city-life/schedules";
+type Part=(color:string,x:number,y:number,z:number,w:number,h:number,d:number,rx?:number,ry?:number)=>void;
 export class EntityView {
   models = new Map<string, THREE.Group>();
   drops = new Map<string, THREE.Mesh>();
   geometry = new THREE.BoxGeometry(1, 1, 1);
   materials = new Map<string, THREE.MeshLambertMaterial>();
-  constructor(public scene: THREE.Scene) {}
+  private civilianMaterial = new THREE.MeshLambertMaterial({ color: "#ffffff" });
+  // Legacy components can render 256 civilians; v8 details at most 96 (v7: 48).
+  readonly civilians = new THREE.InstancedMesh(this.geometry, this.civilianMaterial, 256 * 24);
+  private pose = new THREE.Object3D();
+  private bodyMatrix = new THREE.Matrix4();
+  private partMatrix = new THREE.Matrix4();
+  private colors = new Map<string, THREE.Color>();
+  private actorScale=new THREE.Vector3();
+  constructor(public scene: THREE.Scene) {
+    this.civilians.count = 0; this.civilians.frustumCulled = false;
+    this.civilians.instanceMatrix.setUsage(THREE.DynamicDrawUsage); scene.add(this.civilians);
+  }
   material(color: string) {
     if (!this.materials.has(color))
       this.materials.set(color, new THREE.MeshLambertMaterial({ color }));
@@ -88,14 +103,89 @@ export class EntityView {
     this.models.set(e.id, g);
     return g;
   }
+  private purposefulPerson(e:Entity,t:number,task:TaskChain,state:ResidentState|undefined,part:Part) {
+    const look=task.look,h=identityHash(e.id),phase=h%29,walking=Math.hypot(e.body.velocity.x,e.body.velocity.z)>.2;
+    const action=!walking&&state?.taskActing?state.taskAction:undefined,swing=walking?Math.sin(t*7+phase)*.38:0;
+    const holding=task.prop==="crate"||task.prop==="book"||task.prop==="tea";
+    let left=holding?-.8:swing,right=holding?-.8:-swing;
+    if(action==="greet"){right=-2.1+Math.sin(t*4+phase)*.25;}
+    else if(action==="hammer"){right=-1.05+Math.sin(t*7+phase)*.6;left=-.5;}
+    else if(action==="sweep"){left=right=-.75+Math.sin(t*3.2+phase)*.25;}
+    else if(action==="converse"){right=-.6+Math.sin(t*2+phase)*.25;left=-.25;}
+    else if(action==="sip"){left=right=-1.35;}
+    else if(action==="browse"||action==="inspect"){right=-.75;}
+    else if(action==="serve"||action==="arrange"||action==="shape"||action==="restock"){left=-.65+Math.sin(t*3+phase)*.2;right=-.8-Math.sin(t*3+phase)*.2;}
+    this.actorScale.set(look.width,look.height,look.width);this.bodyMatrix.scale(this.actorScale);
+    part(look.upper,0,.86,0,.55,.68,.32);
+    if(look.apron)part(look.sash,0,.78,.174,.37,.46,.035);
+    part(look.skin,0,1.43,0,.46,.46,.44,action==="inspect"||action==="read"?.1:0,action==="watch"?Math.sin(t*.8+phase)*.25:0);
+    part(look.hair,0,1.66,-.025,.48,.09,.44);
+    if(look.hat==="cap")part(look.hatColor,0,1.73,0,.54,.15,.5);
+    else if(look.hat==="wrap"){part(look.hatColor,0,1.68,0,.51,.14,.48);part(look.sash,.2,1.59,-.21,.09,.24,.09);}
+    else if(look.hat==="straw"){part("#b7a16e",0,1.72,0,.76,.08,.69);part("#aa8b58",0,1.8,0,.39,.14,.36);}
+    else if(look.hat==="topknot")part(look.hair,0,1.78,-.05,.19,.19,.2);
+    for(const x of[-.12,.12])part("#2b3e35",x,1.46,.225,.045,.05,.025);
+    part(look.sash,0,.64,.17,.56,.07,.035);
+    part(look.upper,-.36,.85,0,.16,.6,.2,left);part(look.upper,.36,.85,0,.16,.6,.2,right);
+    part(look.lower,-.16,.28,0,.2,.56,.23,-swing);part(look.lower,.16,.28,0,.2,.56,.23,swing);
+    part(look.hair,-.16,.07,.04,.22,.14,.29);part(look.hair,.16,.07,.04,.22,.14,.29);
+    if(task.prop==="crate"&&(walking||action==="carry"||action==="unload"||action==="restock")){part("#92704b",0,.86,.39,.46,.39,.37);part("#c7a472",0,.86,.59,.46,.055,.025);}
+    if(task.prop==="book"){part("#465e58",0,1.01,.35,.4,.27,.065,-.25);part("#ded3ad",0,1.03,.39,.34,.2,.02,-.25);}
+    if(task.prop==="basket"){part("#9d8050",-.43,.59,.12,.28,.27,.28);part("#c3a66a",-.43,.78,.12,.22,.1,.04);}
+    if(task.prop==="tea"){part("#92704b",0,action==="sip"?1.24:.91,.4,.48,.045,.28);part("#d8d0aa",.1,action==="sip"?1.32:1,.4,.13,.13,.12);}
+    if(task.prop==="tool"){part("#9e8053",.38,.92,.28,.045,.35,.045,right);part("#748782",.38,1.07+(action==="hammer"?Math.sin(t*7+phase)*.12:0),.29,.22,.12,.1);}
+    if(task.prop==="broom"){part("#a08a58",.37,.72,.22,.045,1.25,.045,action==="sweep"?-.3+Math.sin(t*3+phase)*.15:-.15);part("#ae9863",.37,.13,.29,.25,.2,.11);}
+    if(task.prop==="staff"){part("#846d4d",.4,.9,.16,.05,1.8,.05);part("#b7c5b8",.4,1.88,.16,.1,.22,.055);}
+  }
+  private civilianBatch(actors: Entity[], t: number,entities:Entities) {
+    let index = 0;
+    const part = (color: string, x: number, y: number, z: number, w: number, h: number, d: number, rx = 0, ry = 0) => {
+      if (index >= this.civilians.instanceMatrix.count) return;
+      this.pose.position.set(x, y, z); this.pose.scale.set(w, h, d); this.pose.rotation.set(rx, ry, 0); this.pose.updateMatrix();
+      this.partMatrix.multiplyMatrices(this.bodyMatrix, this.pose.matrix); this.civilians.setMatrixAt(index, this.partMatrix);
+      let c = this.colors.get(color); if (!c) { c = new THREE.Color(color); this.colors.set(color, c); }
+      this.civilians.setColorAt(index++, c);
+    };
+    for (const e of actors) {
+      const p = e.body.position, robe = e.profession ? PROFESSIONS[e.profession].color : "#9b905b";
+      const walking = Math.hypot(e.body.velocity.x, e.body.velocity.z) > .2, swing = walking ? Math.sin(t * 7) * .35 : 0;
+      const working = !walking && ["working", "browsing", "gathering", "guarding", "sightseeing"].includes(e.state);
+      const carrying = e.profession === "dock_worker", book = e.profession === "scholar" || e.profession === "researcher";
+      const workArm = working && ["potter", "carpenter", "blacksmith", "merchant", "chef"].includes(e.profession ?? "") ? -.3 + Math.sin(t * 2.2 + p.x) * .18 : 0;
+      this.bodyMatrix.makeRotationY(e.yaw); this.bodyMatrix.setPosition(p.x, p.y, p.z);
+      const task=entities.life?.plan?.byId.get(e.id)?.task;
+      if(task){this.purposefulPerson(e,t,task,entities.life?.states.get(e.id),part);continue;}
+      part(robe, 0, .86, 0, .55, .68, .32);
+      part("#c8aa7e", 0, 1.43, 0, .46, .46, .44, 0, working ? Math.sin(t * .7 + p.z) * .09 : 0);
+      part("#3e4539", 0, 1.68, 0, .51, .12, .49);
+      for (const x of [-.12, .12]) part("#2b3e35", x, 1.46, .225, .045, .05, .025);
+      part("#ceae6b", 0, .64, .17, .56, .06, .03);
+      part(robe, -.36, .85, 0, .16, .6, .2, carrying || book ? -.8 : swing + workArm);
+      part(robe, .36, .85, 0, .16, .6, .2, carrying || book ? -.8 : -swing + workArm);
+      part("#475549", -.16, .28, 0, .2, .56, .23, -swing);
+      part("#475549", .16, .28, 0, .2, .56, .23, swing);
+      if (carrying) { part("#92704b", 0, .85, .4, .49, .43, .4); part("#c7a472", 0, .85, .61, .49, .055, .025); }
+      if (book) { part("#465e58", 0, .99, .35, .43, .29, .065, -.25); part("#ded3ad", 0, 1.015, .39, .36, .21, .02, -.25); }
+      if (e.profession === "fisherman") part("#b29669", .38, 1.15, .25, .045, 1.55, .045, -.25);
+      if (e.profession === "guard") { part("#846d4d", .4, .9, .16, .05, 1.8, .05); part("#b7c5b8", .4, 1.88, .16, .1, .22, .055); }
+      if (working && ["carpenter", "blacksmith"].includes(e.profession ?? "")) part("#73827c", .35, .93 + Math.sin(t * 2.2) * .08, .25, .19, .12, .12);
+    }
+    this.civilians.count = index; this.civilians.visible = index > 0;
+    this.civilians.instanceMatrix.needsUpdate = true;
+    if (this.civilians.instanceColor) this.civilians.instanceColor.needsUpdate = true;
+  }
   update(entities: Entities, t: number) {
-    const alive = new Set(entities.list.map((e) => e.id));
+    const visible = entities.list.filter(e => entities.world.loaded(e.body.position.x,e.body.position.z) &&
+      (e.kind !== "villager" || !entities.life || entities.life.active.has(e.id)));
+    this.civilianBatch(visible.filter(e => e.kind === "villager"), t,entities);
+    const others = visible.filter(e => e.kind !== "villager");
+    const alive = new Set(others.map((e) => e.id));
     for (const [id, g] of this.models)
       if (!alive.has(id)) {
         this.scene.remove(g);
         this.models.delete(id);
       }
-    for (const e of entities.list) {
+    for (const e of others) {
       const g = this.models.get(e.id) ?? this.create(e);
       g.position.set(e.body.position.x, e.body.position.y, e.body.position.z);
       g.rotation.y = e.yaw;
@@ -132,6 +222,7 @@ export class EntityView {
     }
   }
   clear() {
+    this.civilians.count = 0; this.civilians.visible = false;
     for (const g of this.models.values()) this.scene.remove(g);
     for (const m of this.drops.values()) this.scene.remove(m);
     this.models.clear();

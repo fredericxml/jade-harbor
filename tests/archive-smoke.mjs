@@ -8,7 +8,8 @@ import { createHash } from "node:crypto";
 import { createServer } from "node:net";
 import { createRequire } from "node:module";
 
-const defaultArchive = "../JadeHarbor_v1.0.0_Release_Source_and_Dist.zip";
+const packageMeta = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+const defaultArchive = `../JadeHarbor_v${packageMeta.version}_Source_and_Dist.zip`;
 const archive = resolve(process.argv[2] ?? process.env.JADE_HARBOR_ARCHIVE ?? defaultArchive);
 const pythonCandidates = process.platform === "win32" ? ["python", "py"] : ["python3", "python"];
 
@@ -75,6 +76,7 @@ execFileSync(python, [
     "assert 'JadeHarbor/dist/index.html' in names, 'Missing JadeHarbor/dist/index.html'",
     "assert any(n.startswith('JadeHarbor/dist/assets/generation.worker-') and n.endswith('.js') for n in names), 'Missing generation worker'",
     "assert not any('/node_modules/' in n or '/.git/' in n or '/test-results/' in n for n in names), 'Archive contains forbidden development output'",
+    "assert not any(n.startswith('JadeHarbor/docs/proof/') for n in names), 'Curated archive includes docs/proof'",
     "z.extractall(sys.argv[2])",
   ].join("; "),
   archive,

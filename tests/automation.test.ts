@@ -1,4 +1,4 @@
-import { it,expect } from "vitest";
+import { beforeAll,beforeEach,afterEach,afterAll,describe,it,expect } from "vitest";
 import "fake-indexeddb/auto";
 import { World } from "../src/world/world";
 import { BlockColumn } from "../src/world/sections";
@@ -11,7 +11,11 @@ import { Entities } from "../src/game/entities";
 import { chestInventory } from "../src/game/storage";
 import { freshWorld,writeSave,loadSave } from "../src/persistence/saves";
 const p={x:15.5,y:1,z:.5};
-function world(){const w=new World("machines",{},false);for(let x=-1;x<=2;x++){const c=new BlockColumn();for(let z=0;z<16;z++)for(let n=0;n<16;n++)c.set(n,0,z,B.Stone);w.chunks.set(`${x},0`,{cx:x,cz:0,blocks:c,revision:0});}return w;}
+const fixtureWorlds:World[]=[];let preparedMachineWorld:World|undefined;
+function makeWorld(){const w=new World("machines",{},false);for(let x=-1;x<=2;x++){const c=new BlockColumn();for(let z=0;z<16;z++)for(let n=0;n<16;n++)c.set(n,0,z,B.Stone);w.chunks.set(`${x},0`,{cx:x,cz:0,blocks:c,revision:0});}fixtureWorlds.push(w);return w;}
+function world(){const w=preparedMachineWorld??makeWorld();preparedMachineWorld=undefined;return w;}
+beforeEach(()=>{preparedMachineWorld=makeWorld();},20000);
+afterEach(()=>{preparedMachineWorld=undefined;for(const w of fixtureWorlds.splice(0))w.dispose();});
 it("automates chest → hopper → kiln input/fuel → hopper → chest across a chunk boundary",()=>{
   const w=world(),s=new Simulation(w),a=s.automation;
   for(const [x,y,id,state] of [[15,4,B.Chest,0],[15,3,B.Hopper,0],[15,2,B.Furnace,0],[15,1,B.Hopper,2],[16,1,B.Chest,0],[14,2,B.Hopper,2],[14,3,B.Chest,0]])w.set(x,y,1,packed(id,state));
@@ -30,13 +34,18 @@ it("keeps items in a powered or full hopper and resumes exactly when capacity is
   a.containers["16,1,1"][0]=null;for(let n=0;n<25;n++)s.tick(.05,p);
   expect(h.slots[0]).toBeNull();expect(a.containers["16,1,1"][0]).toMatchObject({enchants:{efficiency:2}});
 });
+describe("saved hopper transfer fixture",()=>{
+  let w:World,w2:World;
+  beforeAll(()=>{w=world();w2=world();},20000);
+  afterAll(()=>{w.dispose();w2.dispose();});
 it("never loads a chunk for transfer and reconciles the saved hopper when the destination returns",async()=>{
-  const w=world(),s=new Simulation(w);w.set(15,1,1,packed(B.Hopper,2));w.set(16,1,1,B.Chest);s.automation.hopper("15,1,1").slots[0]={id:103,count:4};
+  const s=new Simulation(w);w.set(15,1,1,packed(B.Hopper,2));w.set(16,1,1,B.Chest);s.automation.hopper("15,1,1").slots[0]={id:103,count:4};
   w.chunks.delete("1,0");for(let i=0;i<30;i++)s.tick(.05,p);expect(w.chunks.has("1,0")).toBe(false);expect(s.automation.hoppers["15,1,1"].slots[0]?.count).toBe(4);
   const d=freshWorld("hopper","machines","survival");d.edits=Object.fromEntries(w.edits);d.simulation={...s.serialize(),containers:s.automation.containers};await writeSave(d);
-  const loaded=await loadSave(d.id),w2=world();for(const [k,v] of Object.entries(loaded.edits)){const [x,y,z]=k.split(",").map(Number);w2.set(x,y,z,v);}
+  const loaded=await loadSave(d.id);for(const [k,v] of Object.entries(loaded.edits)){const [x,y,z]=k.split(",").map(Number);w2.set(x,y,z,v);}
   const resumed=new Simulation(w2,loaded.simulation);resumed.automation.containers=(loaded.simulation!.containers as typeof s.automation.containers);
   for(let i=0;i<45;i++)resumed.tick(.05,p);expect(resumed.automation.containers["16,1,1"][0]).toEqual({id:103,count:4});
+});
 });
 it("collects a dropped stack once and preserves enchanted metadata",()=>{
   const w=world(),s=new Simulation(w),e=new Entities(w,{entities:[],drops:[]});w.set(4,1,4,B.Hopper);w.set(4,0,4,B.Chest);s.indexChunks();

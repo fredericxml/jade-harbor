@@ -1400,3 +1400,18 @@ kbd {
     max-height: 72vh;
   }
 }
+
+ .journal-list { max-height: min(56vh, 520px); overflow-y: auto; padding-right: 8px; }
+.world-density-copy { width: 100%; margin-top: 8px; text-align: left; }
+.journal-hub { padding: 12px 0; border-bottom: 1px solid var(--line, #d6cdbb); }
+.journal-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.journal-heading > div { flex: 1; min-width: 0; }
+.journal-heading button { flex: 0 0 auto; min-width: 86px; }
+.journal-heading p { margin: 5px 0 0; font-size: 13px; line-height: 1.5; }
+.journal-hub details { margin-top: 8px; font-size: 13px; }
+.journal-hub summary { cursor: pointer; padding: 4px 0; color: #47665b; }
+.journal-hub ul { list-style: none; padding-left: 12px; margin: 8px 0 0; }
+.journal-hub li { padding: 4px 0; }
+.journal-hub li span { display: inline-block; min-width: 16px; }
+.journal-hub .undiscovered { color: #776e60; }
+@media (max-width: 560px) { .journal-heading { flex-wrap: wrap; gap: 8px; } .journal-heading > div { flex-basis: 100%; } }

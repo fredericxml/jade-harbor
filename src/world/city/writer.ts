@@ -6,8 +6,10 @@ export class VoxelWriter {
     public data: BlockColumn,
     public ox: number,
     public oz: number,
+    private elevation: (x: number, z: number) => number = () => 0,
   ) {}
   put(x: number, y: number, z: number, id: number) {
+    y += this.elevation(x, z);
     if (
       x >= this.ox &&
       x < this.ox + 16 &&
@@ -34,7 +36,7 @@ export class VoxelWriter {
           x <= Math.min(this.ox + 15, x2);
           x++
         )
-          this.data.set(x-this.ox,y,z-this.oz,id);
+          this.put(x, y, z, id);
   }
   local(s: Structure) {
     const facing = s.facing,

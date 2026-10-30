@@ -81,7 +81,7 @@ export type NavAgent={search?:PathSearch;path:Vec3[];index:number;target:string;
 /** One fair queue for all NPCs: no per-NPC unbounded A* in a frame. Paths are disposable caches. */
 export class Navigation {
   agents=new Map<string,NavAgent>();
-  expandedLastTick=0; private cursor=0;
+  expandedLastTick=0; searchesStarted=0; solveMs=0; private cursor=0;
   constructor(public world:World){}
   removeMissing(ids:Set<string>){for(const id of this.agents.keys())if(!ids.has(id))this.agents.delete(id);}
   steer(id:string,p:Vec3,target:Vec3,dt:number,doors=true,height=1.75) {
@@ -96,7 +96,7 @@ export class Navigation {
     }
     while(a.index<a.path.length && Math.hypot(a.path[a.index].x-p.x,a.path[a.index].z-p.z)<.16 && Math.abs(a.path[a.index].y-p.y)<.3)a.index++;
     if(a.path.length && a.index>=a.path.length){a.status='arrived';return null;}
-    if(!a.path.length && !a.search && a.retry<=0){a.search=new PathSearch(this.world,p,target,doors,height);a.status=a.search.status;a.retry=3;}
+    if(!a.path.length && !a.search && a.retry<=0){this.searchesStarted++;a.search=new PathSearch(this.world,p,target,doors,height);a.status=a.search.status;a.retry=3;}
     const next=a.path[a.index];
     if(next){
       if(a.last && Math.hypot(a.last.x-p.x,a.last.z-p.z)<.008)a.stuck+=dt;else a.stuck=0;
@@ -107,12 +107,13 @@ export class Navigation {
     return null;
   }
   tick(maxNodes=96,budgetMs=2){
+    const started=performance.now();
     this.expandedLastTick=0;const jobs=[...this.agents.values()].filter(a=>a.search);
     const end=performance.now()+budgetMs;
     for(let i=0;i<jobs.length && this.expandedLastTick<maxNodes && performance.now()<end;i++) {
       const a=jobs[(i+this.cursor)%jobs.length],s=a.search!;const before=s.expanded;s.step(Math.min(24,maxNodes-this.expandedLastTick));this.expandedLastTick+=s.expanded-before;
       if(s.status!=='searching'){a.status=s.status;a.path=s.path;a.index=0;a.revision=this.world.navRevision;a.search=undefined;}
     }
-    this.cursor++;
+    this.cursor++;this.solveMs=performance.now()-started;
   }
 }

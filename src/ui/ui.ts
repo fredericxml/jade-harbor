@@ -156,6 +156,7 @@ export type Screen =
   | "enchant"
   | "brew"
   | "anvil"
+  | "journal"
   | "trade"
   | "death";
 export class UI {
@@ -311,6 +312,7 @@ export class UI {
               `<button data-action="delete" data-id="${id}">Delete</button>`,
               "</div>",
               "</div>",
+              (save.generator??0) >= 6 && (save.generator??0) < 10 ? `<button class="world-density-copy" data-action="dense-city-copy" data-id="${id}" title="Create an updated city in a separate save, keeping your edits and progress. Starts at Panda Plaza.">Create updated city copy</button>` : "",
               '<div class="world-processing" role="status" aria-live="polite" hidden>',
               '<span class="processing-spinner" aria-hidden="true"></span>',
               '<span class="world-processing-label"></span>',
@@ -341,7 +343,7 @@ export class UI {
         `<div class="world-list">${worldList}</div>`,
         "</section>",
         "</div>",
-        '<footer class="home-footer"><span>JADE HARBOR <i> / </i> MORTAL REALM</span><span>Built block by block.</span><span>JADE HARBOR · v1.0.0</span></footer>',
+        '<footer class="home-footer"><span>JADE HARBOR <i> / </i> MORTAL REALM</span><span>Built block by block.</span><span>JADE HARBOR · v2.0.0</span></footer>',
       ].join(""),
     );
   }
@@ -367,7 +369,7 @@ export class UI {
   }
 
   panel(screen: Screen, title: string, subtitle: string, body: string) {
-    const goesBack = screen === "settings" || screen === "controls";
+    const goesBack = screen === "settings" || screen === "controls" || screen === "journal";
     const closeAction = goesBack ? "back" : "resume";
     const closeLabel = goesBack
       ? "Back to previous screen"
@@ -407,6 +409,7 @@ export class UI {
     const actions = [
       '<button class="primary" data-action="resume">Return to world <span>↗</span></button>',
       '<button data-action="save">Save world</button>',
+      '<button data-action="journal">Travel journal</button>',
       '<button data-action="menu">Save & return home</button>',
       '<button data-action="export">Export backup</button>',
       '<button data-action="settings">Settings</button>',

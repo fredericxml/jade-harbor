@@ -1,4 +1,4 @@
-import {it,expect} from 'vitest';
+import {beforeAll,afterAll,describe,it,expect} from 'vitest';
 import 'fake-indexeddb/auto';
 import {BlockColumn} from '../src/world/sections';
 import {World} from '../src/world/world';
@@ -10,6 +10,7 @@ import {freshWorld,writeSave,loadSave} from '../src/persistence/saves';
 import {terrainHeight} from '../src/world/generator';
 import {seedNumber} from '../src/world/noise';
 import {moveBody,Body} from '../src/player/physics';
+import {Simulation} from '../src/game/simulation';
 it('round trips all requested heights with sparse sections and negative X/Y/Z',()=>{
  const c=new BlockColumn();
  for(const y of [-64,-63,-1,0,15,16,79,80,255,319]) {c.set(15,y,0,B.Red);expect(c.get(15,y,0)).toBe(B.Red);expect(chunkCoord(y)*16+localCoord(y)).toBe(y);expect(index(15,localCoord(y),0)).toBeLessThan(4096);}
@@ -26,13 +27,17 @@ it('culls vertical section borders and dirties only affected sections',()=>{
  expect([...w.dirty].sort()).toEqual(['-1,-1,-1','-1,0,-1']);
  expect(meshChunk(w,c,undefined,-1)[0].indices.length).toBe(36);
 });
+describe('deep edit overlay fixture',()=>{
+ let d:ReturnType<typeof freshWorld>,w:World;
+ beforeAll(()=>{d=freshWorld('deep','a','creative');w=new World('a',{},false);},20000);
+ afterAll(()=>w.dispose());
 it('saves negative elevation and the highest build layer without 16-bit column-index overflow',async()=>{
- const d=freshWorld('deep','a','creative'),w=new World('a',{},false);
  for(const y of [-63,-1,0,15,16,79,80,255,319]) w.set(-17,y,-16,B.Porcelain);
  d.player.position={x:-16.5,y:-32,z:-15.5};
- await writeSave(d,w.captureChanges().chunks);const read=await loadSave(d.id),restored=new World('a',read.edits,false);restored.ensure(-2,-1,true);
+ const revision=await writeSave(d);await writeSave(d,w.captureChanges().chunks,revision);const read=await loadSave(d.id),restored=new World('a',read.edits,false);restored.ensure(-2,-1,true);
  for(const y of [-63,-1,0,15,16,79,80,255,319]) expect(restored.get(-17,y,-16)).toBe(B.Porcelain);
- expect(read.player.position.y).toBe(-32);expect(w.set(0,MIN_Y,0,0)).toBe(false);expect(w.set(0,MAX_Y+1,0,1)).toBe(false);
+ expect(read.player.position.y).toBe(-32);expect(w.set(0,MIN_Y,0,0)).toBe(false);expect(w.set(0,MAX_Y+1,0,1)).toBe(false);restored.dispose();
+});
 });
 it('propagates lantern light across negative vertical boundaries and shades deep roofs',()=>{
  const w=new World('a',{},false),c={cx:0,cz:0,blocks:new BlockColumn(),revision:0};w.chunks.set('0,0',c);
@@ -57,5 +62,25 @@ it('lets a physical player descend the mine half steps to negative Y',()=>{
 it('discards a light job when a column unloads during staged sky diffing',()=>{
  const w=new World('a',{},false);w.chunks.set('0,0',{cx:0,cz:0,blocks:new BlockColumn(),revision:0});w.set(2,2,2,B.Stone);
  const l=new Lighting(w);l.update(0);w.chunks.clear();
- let n=0;expect(()=>{while(l.pending && n++<100)l.update(0);}).not.toThrow();expect(l.signature).toBe('');
+ let n=0;expect(()=>{while(l.pending && n++<100)l.update(0);}).not.toThrow();expect(l.signature).toBe(-1);
+});
+
+it('saves boundary edits immediately with pending simulation work in both generator versions',async()=>{
+ for(const generator of [3,4]) {
+  const data={...freshWorld('boundary work','jade-harbor','creative'),generator};
+  const world=new World(data.seed,{},false,generator),sim=new Simulation(world);
+  world.onChange=(x,y,z)=>sim.changed(x,y,z);
+  for(const [x,y,z] of [[15,MIN_Y+1,16],[-16,MAX_Y,-16],[1e7,4,-1e7]]) world.set(x,y,z,B.Red);
+  expect(sim.queue.has('15,-63,16')).toBe(true);
+  expect(sim.queue.has('-16,319,-16')).toBe(true);
+  for(const key of sim.queue) {
+   const [x,y,z]=key.split(',').map(Number);
+   expect(y).toBeGreaterThan(MIN_Y);expect(y).toBeLessThanOrEqual(MAX_Y);
+   expect(Math.abs(x)).toBeLessThanOrEqual(1e7);expect(Math.abs(z)).toBeLessThanOrEqual(1e7);
+  }
+  data.edits=Object.fromEntries(world.edits);data.simulation=sim.serialize();
+  await writeSave(data);const loaded=await loadSave(data.id);
+  expect(loaded.edits).toEqual(data.edits);expect(loaded.simulation?.pendingTicks).toEqual([...sim.queue]);
+  world.dispose();
+ }
 });

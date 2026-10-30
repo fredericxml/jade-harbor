@@ -1,3 +1,6 @@
+import { PROFESSIONS } from "../game/professions";
+import { Discoveries } from "../game/city-life/discoveries";
+import { journalPlaces, travelDestinations, travelUnlocked, safeTravelArrival, travelColumns, type TravelDestination } from "../game/city-life/travel";
 import { chestInventory } from "../game/storage";
 import { HOPPER_DIRECTIONS } from "../game/automation";
 import { useBucket } from "../game/buckets";
@@ -46,9 +49,10 @@ import {
   deleteSave,
   exportSave,
   validateSave,
+  denseCityCopy,
 } from "../persistence/saves";
 import { MIN_Y, MAX_Y, clamp, Vec3, idOf, packed, stateOf, blockKey } from "./coords";
-import { GENERATOR_VERSION, biomeAt } from "../world/generator";
+import { biomeAt } from "../world/generator";
 import { seedNumber } from "../world/noise";
 export class Game {
   ui: UI;
@@ -77,6 +81,9 @@ export class Game {
   exhaustion = 0;
   spawn = { x: 0.5, y: 21.1, z: 22.5 };
   active = false;
+  travelState?: { destination: TravelDestination; world: World; serial: number; origin: Vec3; camera: Vec3 };
+  private travelSerial = 0;
+  readonly travelMetrics:{id:string;mode:Mode;ms:number;success:boolean;columns:number;pending:number;meshQueue:number}[]=[];
   dead = false;
   meta = { id: "", name: "", seed: "jade-harbor", created: 0 };
   saves: SaveSummary[] = [];
@@ -123,6 +130,9 @@ export class Game {
   hitMessage = "";
   attackCooldown = 0;
   tradeEntity: Entity | null = null;
+  discoveries?: Discoveries;
+  discoveryClock = 0;
+  private discoveryArrival?: Vec3;
   breath = 10;
   hardcoreEnded = false;
   containerKey = "";
@@ -271,8 +281,7 @@ export class Game {
     this.settings.volume = clamp(finite(this.settings.volume, 30), 0, 100);
     this.view.camera.fov = this.settings.fov;
     this.view.camera.updateProjectionMatrix();
-    (this.view.scene.fog as THREE.Fog).near = this.settings.distance * 10;
-    (this.view.scene.fog as THREE.Fog).far = this.settings.distance * 24;
+    this.view.distance = this.settings.distance;
     this.audio.volume = this.settings.volume / 100;
     try {
       localStorage.setItem(
@@ -305,11 +314,15 @@ export class Game {
     seed = "jade-harbor",
     mode: Mode = "creative",
   ) {
+    if(this.travelState)this.cancelTravel(false);
+    this.travelSerial++; this.travelState = undefined;
     if (this.active && !(await this.save()))
       throw new Error("Save the current world before opening another.");
     clearTimeout(this.saveTimer);
     data = data ? validateSave(data) : freshWorld(name, seed, mode);
     this.saveRevision = data.revision ?? 0;
+    this.discoveries?.dispose();
+    this.entities.dispose();
     this.world.dispose();
     this.view.clear();
     this.mode = data?.mode ?? mode;
@@ -319,9 +332,9 @@ export class Game {
       seed: data?.seed ?? seed,
       created: data?.created ?? Date.now(),
     };
-    this.world = new World(this.meta.seed, data?.edits ?? {});
+    this.world = new World(this.meta.seed, data.edits, true, data.generator);
     this.simulation = new Simulation(this.world, data?.simulation);
-    this.entities = new Entities(this.world, data?.simulation);
+    this.entities = new Entities(this.world, data?.simulation, data.time);
     this.entityView.clear();
     this.lighting = new Lighting(this.world);
     this.view.lighting = this.lighting;
@@ -360,8 +373,12 @@ export class Game {
     this.saturation = data.player.saturation ?? 5;
     this.exhaustion = data.player.exhaustion ?? 0;
     this.time = data?.time ?? 0.24;
+    this.view.attachWorld(this.world,this.time,this.simulation.weather==="rain");
     this.dead = data?.player.dead ?? false;
     this.achievements = new Set(data?.achievements ?? []);
+    this.discoveries = new Discoveries(this.world, this.achievements);
+    this.discoveryClock = 0;
+    this.discoveryArrival={...this.body.position};
     this.containers =
       (data?.simulation?.containers as Record<string, (Stack | null)[]>) ?? {};
     const cx = Math.floor(this.body.position.x / 16),
@@ -450,7 +467,7 @@ export class Game {
   snapshot(includeEdits = true): SaveData {
     return {
       version: 1,
-      generator: GENERATOR_VERSION,
+      generator: this.world.generatorVersion,
       format: "jade-harbor-engine",
       revision: this.saveRevision,
       ...this.meta,
@@ -514,8 +531,11 @@ export class Game {
         const started = performance.now();
         const captured = world.captureChanges();
         const activityVersion = this.saveActivityVersion;
-        const state = this.snapshot(false);
-        const revision = await writeSave(state, captured.chunks, this.saveRevision);
+        // A new/imported world has no checkpoint to extend. Its first commit
+        // must include the complete overlay, including edits loaded at start.
+        const firstCommit = this.saveRevision === 0;
+        const state = this.snapshot(firstCommit);
+        const revision = await writeSave(state, firstCommit ? undefined : captured.chunks, this.saveRevision);
         world.acknowledgeChanges(captured.revisions);
         this.view.metrics.add("save", performance.now() - started);
         this.saveRevision = revision;
@@ -552,7 +572,85 @@ export class Game {
       if (this.saveAgain && this.active) void this.save();
     }
   }
+  showJournal() {
+    const book=this.discoveries,places=journalPlaces(this.world),hubs=travelDestinations(this.world);
+    const cards=hubs.map(h=>{
+      const members=places.filter(p=>p.parentHubId===h.id),visited=members.filter(p=>book?.has(p.discoveryId)).length,unlocked=travelUnlocked(h,this.mode,this.achievements);
+      return `<article class="journal-hub"><div class="journal-heading"><div><strong>${esc(h.title)}</strong><p>${esc(h.description)}</p></div><button data-action="travel" data-id="${esc(h.id)}" ${unlocked?"":"disabled"}>${unlocked?"Travel":"Locked · visit area"}</button></div><details><summary>${visited} / ${members.length} places discovered</summary><ul>${members.map(p=>`<li class="${book?.has(p.discoveryId)?"discovered":"undiscovered"}"><span aria-label="${book?.has(p.discoveryId)?"Discovered":"Undiscovered"}">${book?.has(p.discoveryId)?"✓":"?"}</span> ${esc(p.title)}</li>`).join("")}</ul></details></article>`;
+    }).join("");
+    this.ui.panel("journal","Travel journal",`${book?.count??0} / ${places.length} places discovered · ${hubs.length} travel hubs`,
+      `<div class="journal-list">${cards||'<p>No area travel is available in this world.</p>'}</div><p class="form-note">${this.mode==="creative"||this.mode==="spectator"?"All area hubs are available in this mode.":"Discover any place in an area on foot to unlock its hub."}</p>`);
+  }
+  cancelTravel(show=true) {
+    const pending=this.travelState;if(!pending)return;
+    this.travelSerial++;this.travelState=undefined;
+    if(this.world===pending.world){this.body.position={...pending.origin};this.previous={...pending.origin};this.view.camera.position.set(pending.camera.x,pending.camera.y,pending.camera.z);}
+    if(show)this.showJournal();
+  }
+  async travelTo(id:string) {
+    if(!this.active||this.dead||this.travelState)return false;
+    const destination=travelDestinations(this.world).find(d=>d.id===id);
+    if(!destination||!travelUnlocked(destination,this.mode,this.achievements))return false;
+    if(!this.inventory.settleCursor()){this.ui.toast("Make room for the stack you are holding.");return false;}
+    const began=performance.now(),travelMode=this.mode;
+    const world=this.world,serial=++this.travelSerial,origin={...this.body.position},camera=this.view.camera.position.clone();
+    this.input.keys.clear();this.input.left=this.input.right=false;
+    document.exitPointerLock?.();
+    this.travelState={destination,world,serial,origin,camera};
+    this.ui.panel("journal","Traveling…",destination.title,'<p role="status">Preparing a safe arrival…</p><button data-action="travel-cancel">Cancel travel</button>');
+    let committed=false;
+    const deadline=performance.now()+3000;
+    const check=()=>{
+      if(this.world!==world||this.travelSerial!==serial)throw Error("Travel cancelled");
+      if(performance.now()>=deadline)throw Error("Arrival preparation timed out. Try again.");
+    };
+    const bounded=async<T>(work:Promise<T>):Promise<T>=>{
+      let timer:ReturnType<typeof setTimeout>|undefined;
+      try{return await Promise.race([work,new Promise<T>((_,reject)=>{timer=setTimeout(()=>reject(Error("Arrival preparation timed out. Try again.")),Math.max(0,deadline-performance.now()));})]);}
+      finally{clearTimeout(timer);}
+    };
+    try {
+      // Save once before eviction. Collision preparation owns only a tiny
+      // footprint; district meshes, lighting and NPC settling are Stage B.
+      if(!(await bounded(this.save())))throw Error("Save your world before traveling.");
+      check();let arrival:Vec3|undefined;
+      for(const anchor of [destination.arrival,...(destination.fallback?[destination.fallback]:[])]) {
+        const candidate={...destination,arrival:anchor};
+        for(const c of travelColumns(candidate)) {
+          check();world.ensure(c.cx,c.cz,true);check();
+          // Yield to Cancel and timeout without waiting for a rendered frame.
+          await bounded(new Promise<void>(resolve=>setTimeout(resolve,0)));check();
+        }
+        arrival=safeTravelArrival(world,candidate);if(arrival)break;
+      }
+      if(!arrival)throw Error("Unable to find a safe arrival. Try again.");
+      check();
+      this.view.camera.position.set(arrival.x,arrival.y+1.61,arrival.z);
+      this.view.rebuild(world,2); // Best effort immediate ground, no queue drain.
+      check();
+      this.discoveryArrival={...arrival};
+      this.body.position={...arrival};this.previous={...arrival};this.body.velocity={x:0,y:0,z:0};
+      this.body.grounded=true;this.body.flying=this.mode==="spectator";this.body.fallStart=arrival.y;
+      this.yaw=Math.atan2(-(destination.focus.x-arrival.x),-(destination.focus.z-arrival.z));
+      this.pitch=Math.max(-.22,Math.min(.2,Math.atan2(destination.focus.y-arrival.y-1.61,Math.max(8,Math.hypot(destination.focus.x-arrival.x,destination.focus.z-arrival.z)))));
+      this.view.camera.rotation.set(this.pitch,this.yaw,0,"YXZ");this.accumulator=0;
+      this.hit=null;this.entityHit=null;this.mineProgress=0;this.mineKey="";this.crouching=false;
+      this.entities.life?.reactivate();this.entities.navigation.agents.clear();
+      this.entities.life?.prepare(this.entities.list,arrival,this.time,this.simulation.weather==="rain",this.entities.elapsed,this.entities.navigation);
+      committed=true;this.travelState=undefined;this.resume(false);this.scheduleSave();
+      this.ui.toast(`Arrived: ${destination.title}`);return true;
+    }catch(error){
+      if(this.world===world&&this.travelSerial===serial){this.travelState=undefined;this.showJournal();this.ui.toast(error instanceof Error?error.message:"Travel failed. Please try again.");}
+      return false;
+    }finally{
+      if(this.travelMetrics.length>=120)this.travelMetrics.shift();
+      this.travelMetrics.push({id,mode:travelMode,ms:performance.now()-began,success:committed,columns:world.chunks.size,pending:world.pending.size,meshQueue:world.dirty.size});
+      if(!committed&&this.world===world&&this.travelSerial===serial){this.body.position={...origin};this.previous={...origin};this.view.camera.position.copy(camera);}
+      if(this.travelState?.serial===serial)this.travelState=undefined;
+    }
+  }
   resume(relock = true) {
+    if (this.travelState) return;
     if (!this.active) {
       this.ui.menu(this.saves);
       return;
@@ -598,6 +696,10 @@ export class Game {
     if (screen === "craft") this.showCraft();
   }
   key(code: string) {
+    if (this.travelState) {
+      if (code === "Escape") this.cancelTravel();
+      return;
+    }
     if (/^Digit[1-9]$/.test(code) && this.active &&
         (this.ui.screen === "none" || this.ui.screen === "inventory")) {
       this.inventory.selected = Number(code.slice(-1)) - 1;
@@ -617,7 +719,7 @@ export class Game {
         this.showDeath();
       } else if (this.ui.screen === "none") {
         this.pause();
-      } else if (this.ui.screen === "settings" || this.ui.screen === "controls") {
+      } else if (this.ui.screen === "settings" || this.ui.screen === "controls" || this.ui.screen === "journal") {
         this.backToPreviousScreen();
       } else {
         // Escape closes the modal; a fresh click reacquires browser pointer lock.
@@ -666,6 +768,7 @@ export class Game {
   async action(action: string, button: HTMLElement, event: MouseEvent) {
     this.audio.play("click");
     const id = button.dataset.id;
+    if(this.travelState){if(action==="back"||action==="travel-cancel")this.cancelTravel();return;}
     if (action === "new") {
       this.ui.create();
       return;
@@ -697,6 +800,7 @@ export class Game {
         }
         if (!(await this.save())) return;
         this.active = false;
+        this.view.clearDistant();this.view.atmosphere.reset(.23,false,this.view.distance);
         this.input.unlock();
       }
       await this.refreshSaves();
@@ -746,6 +850,18 @@ export class Game {
         await resetSave(s.id);
         await this.refreshSaves();
         this.ui.toast("World reset. The city and Panda Plaza are ready again.");
+      }
+      return;
+    }
+    if (action === "dense-city-copy") {
+      const s = this.saves.find(s => s.id === id);
+      if (s) {
+        this.ui.worldProcessing(s.id, "Creating updated city copy…");
+        try {
+          await writeSave(denseCityCopy(await loadSave(s.id),10));
+          await this.refreshSaves();
+          this.ui.toast("Updated city copy created. Start at Panda Plaza with your saved progress.");
+        } catch (error) { this.ui.worldProcessing(s.id, null); throw error; }
       }
       return;
     }
@@ -809,6 +925,19 @@ export class Game {
     }
     if (action === "export") {
       exportSave(this.snapshot());
+      return;
+    }
+    if (action === "journal") {
+      this.returnScreen = this.ui.screen;
+      this.showJournal();
+      return;
+    }
+    if (action === "travel") {
+      await this.travelTo(id ?? "");
+      return;
+    }
+    if (action === "travel-cancel") {
+      this.cancelTravel();
       return;
     }
     if (action === "settings") {
@@ -1432,13 +1561,13 @@ export class Game {
     this.ui.panel(
       "trade",
       esc(e.name),
-      `Trade locally grown goods for jade tokens. ${esc(e.state)} · Offers restock at dawn.`,
+      `${esc(e.profession ? PROFESSIONS[e.profession].label : "Resident")} · ${esc(this.entities.life?.description(e.id) || e.state)}${offersFor(e).length ? " · Offers restock at dawn." : ""}`,
       `<div class="trade-list">${offersFor(e)
         .map(
           ({ offer, id }) =>
             `<button data-action="trade" data-id="${id}" ${e.trades >= 12 ? "disabled" : ""}>${icon(offer.output[0])}<span>${offer.label}</span><span>${offer.cost.map(([itemId, count]) => `${count} ${item(itemId)?.name}`).join(" + ")} → ${offer.output[1]}</span></button>`,
         )
-        .join("")}</div><p class="form-note">${12 - e.trades} trades remaining today · You have ${this.inventory.count(111)} jade tokens.</p>`,
+        .join("")}</div><p class="form-note">${offersFor(e).length ? `${12 - e.trades} trades remaining today · You have ${this.inventory.count(111)} jade tokens.` : "No goods for trade at this post."}</p>`,
     );
   }
   breakContents(x: number, y: number, z: number,loot:Stack[]=[]) {
@@ -1628,6 +1757,7 @@ export class Game {
     this.simulation.occupants=[...this.entities.list.filter(e=>e.health>0).map(e=>e.body.position),...this.entities.drops.map(d=>d.position)];
     this.simulation.tick(dt, p, this.mode !== "spectator");
     this.entities.interactingId=this.ui.screen==="trade" ? this.tradeEntity?.id ?? "" : "";
+    this.entities.weather = this.simulation.weather;
     this.entities.tick(
       dt,
       p,
@@ -1641,6 +1771,16 @@ export class Game {
       },
       this.mode !== "spectator",
     );
+    const walking=this.body.grounded&&!this.body.flying&&this.mode!=="spectator";
+    // Recognize the walk while input is held, independently of the slower
+    // collection cadence. Stopping between polls must not lose a real visit.
+    if(this.discoveryArrival&&walking&&(f||r)&&Math.hypot(p.x-this.discoveryArrival.x,p.z-this.discoveryArrival.z)>=2)this.discoveryArrival=undefined;
+    this.discoveryClock -= dt;
+    if (this.discoveryClock <= 0) {
+      this.discoveryClock = .5;
+      const found = this.discoveries?.visit(p, walking&&!this.discoveryArrival);
+      if (found) { this.ui.toast(`Discovered: ${found.title}`); this.scheduleSave(); }
+    }
     if(this.ui.screen==="brew" && this.tickCount%10===0)this.showBrewer();
     if(this.ui.screen==="hopper" && this.tickCount%10===0)this.showHopper();
     this.health=this.status.tick(dt,this.health,["creative","spectator"].includes(this.mode));
@@ -1678,6 +1818,11 @@ export class Game {
     const dt = Math.min(0.2, elapsed/1000);
     this.lastTime = t;
     this.frameCount++;
+    if(this.travelState) {
+      // Keep the last frame behind the preparation panel. Spending this time
+      // on the old district's meshes/GPU/lighting delays collision readiness.
+      this.accumulator=0;requestAnimationFrame(t=>this.frame(t));return;
+    }
     if (t - this.fpsTime > 1000) {
       this.fps = Math.round((this.frameCount * 1000) / (t - this.fpsTime));
       this.frameCount = 0;
@@ -1728,9 +1873,9 @@ export class Game {
       this.view.hand.rotation.x = -0.12 - heldSwing + heldSway * 0.012;
       this.view.hand.rotation.z = -0.26 + Math.sin(t * 0.0021) * 0.01;
       this.view.hand.position.y = -0.64 + heldSway * 0.005;
-      this.view.environment(this.time, this.simulation.weather === "rain",this.status.has("night_vision"));
+      this.view.environment(this.time, this.simulation.weather === "rain",this.status.has("night_vision"),dt);
       this.entityView.update(this.entities, t / 1000);
-      this.effects.update(dt, p, this.simulation.weather === "rain", t / 1000);
+      this.effects.update(dt, p, this.view.atmosphere.rain*this.view.rainExposure, t / 1000);
       if (
         this.lighting.pending ||
         (t - this.lastLighting > 1200 && this.world.pending.size === 0)
@@ -1744,10 +1889,14 @@ export class Game {
         this.lastHud = t;
         const hour = Math.floor((this.time * 24 + 6) % 24),
           minute = Math.floor((this.time * 1440) % 60);
+        const geography = this.debug ? this.world.inspectTerrain(p.x, p.z) : undefined;
+        const architecture = this.debug ? this.world.inspectDistrict(p.x,p.z) : undefined;
+        const landmarkDebug = this.debug ? this.world.inspectLandmark(p.x,p.z) : undefined;
+        const urbanDebug = architecture ? `\n${architecture.district?.name ?? "Outside districts"} · ${architecture.road?.kind ?? "off street"} · ${architecture.lot?.archetype ?? "open space"} / ${architecture.lot?.roofFamily ?? "—"} / ${architecture.lot?.facade ?? "—"}` : "";
         this.ui.updateHUD(this.inventory, {
           name: this.meta.name,
           mode: this.mode,
-          biome: biomeAt(p.x, p.z, seedNumber(this.meta.seed)),
+          biome: biomeAt(p.x, p.z, seedNumber(this.meta.seed), this.world.generatorVersion),
           x: Math.floor(p.x),
           y: Math.floor(p.y),
           z: Math.floor(p.z),
@@ -1767,7 +1916,7 @@ export class Game {
           hitFlash: this.hitFlash > 0,
           hitMessage: this.hitFlash > 0 ? this.hitMessage : "",
           debug: this.debug
-            ? `${this.fps} FPS · target 20 TPS\nFrame p50/p95 ${this.view.metrics.summary("frame").p50.toFixed(1)}/${this.view.metrics.summary("frame").p95.toFixed(1)} ms · tick p95 ${this.view.metrics.summary("tick").p95.toFixed(1)} ms\n${this.world.chunks.size} chunks · ${this.world.pending.size} generating · ${this.world.dirty.size} mesh queue\n${this.view.renderer.info.render.triangles} triangles · ${this.view.renderer.info.render.calls} draws · ${this.view.renderer.info.memory.geometries} geometries\n${this.entities.list.length} entities · ${this.world.evictionBlocked} pinned unsaved chunks\nCPU block arrays ~${([...this.world.chunks.values()].reduce((n,c)=>n+c.blocks.byteLength,0)/1048576).toFixed(1)} MiB (excludes GPU/heap)\n${this.world.edits.size} edits · save rev ${this.saveRevision} · ${this.meta.seed}`
+            ? `Generator ${this.world.generatorVersion} · ${geography?.region ?? "legacy geography"} · ${geography?.reservation ?? "no landmark reserve"}\n${geography ? `Slope ${geography.slope.toFixed(2)} · buildable ${geography.buildable} · plan ${geography.planMs.toFixed(1)} ms / ${this.world.planCount} active` : "Legacy v3 terrain retained"}\n${urbanDebug}${landmarkDebug ? `\n${landmarkDebug.name} · ${landmarkDebug.reservation.id}` : ""}\n${this.fps} FPS · target 20 TPS\nFrame p50/p95 ${this.view.metrics.summary("frame").p50.toFixed(1)}/${this.view.metrics.summary("frame").p95.toFixed(1)} ms · tick p95 ${this.view.metrics.summary("tick").p95.toFixed(1)} ms\n${this.world.chunks.size} chunks · ${this.world.pending.size} generating · ${this.world.dirty.size} mesh queue\n${this.view.worldRenderStats.triangles} triangles · ${this.view.worldRenderStats.calls} draws · ${this.view.renderer.info.memory.geometries} geometries\n${this.entities.list.length} entities · ${this.entities.life?.metrics.active ?? "legacy"} active residents · ${this.entities.navigation.agents.size} routes / ${this.entities.navigation.expandedLastTick} nodes\nLife ${this.entities.life?.metrics.scheduleMs.toFixed(2) ?? "0"} ms · nav ${this.entities.navigation.solveMs.toFixed(2)} ms · ${this.entities.life?.event?.title ?? "no gathering"}\n${this.view.atmosphere.phase} · fog ${this.view.atmosphere.fogNear.toFixed(0)}/${this.view.atmosphere.fogFar.toFixed(0)} · LOD ${this.view.distant?.stats.terrainTriangles??0}+${this.view.distant?.stats.anchorTriangles??0} triangles\n${this.world.evictionBlocked} pinned unsaved chunks\nCPU block arrays ~${([...this.world.chunks.values()].reduce((n,c)=>n+c.blocks.byteLength,0)/1048576).toFixed(1)} MiB (excludes GPU/heap)\n${this.world.edits.size} edits · save rev ${this.saveRevision} · ${this.meta.seed}`
             : "",
         });
       }
@@ -1789,6 +1938,7 @@ export class Game {
         this.view.metrics.add("lighting",performance.now()-started);
       }
     }
+    if(this.active)this.view.updateDistant(this.world);
     this.view.render();
     requestAnimationFrame((t) => this.frame(t));
   }

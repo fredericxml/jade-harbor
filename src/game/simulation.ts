@@ -151,8 +151,14 @@ export class Simulation {
       }
   }
   changed(x: number, y: number, z: number) {
-    for (const [dx, dy, dz] of [[0, 0, 0], ...neighbors])
-      this.queue.add(blockKey(x + dx, y + dy, z + dz));
+    if (![x, y, z].every(Number.isInteger)) return;
+    for (const [dx, dy, dz] of [[0, 0, 0], ...neighbors]) {
+      const nx = x + dx, ny = y + dy, nz = z + dz;
+      // Persistable work only: a save can run before updates() discards a
+      // bedrock/out-of-world neighbor of an edit at the build limits.
+      if (ny > MIN_Y && ny <= MAX_Y && Math.abs(nx) <= 1e7 && Math.abs(nz) <= 1e7)
+        this.queue.add(blockKey(nx, ny, nz));
+    }
   }
   furnace(key: string) {
     return (this.furnaces[key] ??= {

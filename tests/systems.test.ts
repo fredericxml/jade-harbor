@@ -1,5 +1,5 @@
 import { BlockColumn } from "../src/world/sections";
-import { describe, it, expect } from "vitest";
+import { beforeEach,afterEach,describe,it,expect } from "vitest";
 import { World } from "../src/world/world";
 import { B } from "../src/world/blocks";
 import { packed, index, stateOf, idOf, blockKey } from "../src/core/coords";
@@ -7,8 +7,9 @@ import { Simulation, Furnace, tickFurnace } from "../src/game/simulation";
 import { Entities, spawnEntity } from "../src/game/entities";
 import { Inventory } from "../src/game/inventory";
 import { Lighting } from "../src/world/lighting";
+let preparedWorld:World;
 function emptyWorld() {
-  const w = new World("test", {}, false);
+  const w = preparedWorld;
   for (let cz = -1; cz <= 1; cz++)
     for (let cx = -1; cx <= 1; cx++) {
       const blocks = new BlockColumn();
@@ -61,6 +62,8 @@ describe("processing and safe storage", () => {
   });
 });
 describe("world systems", () => {
+  beforeEach(()=>{preparedWorld=new World("test",{},false);},20000);
+  afterEach(()=>preparedWorld.dispose());
   it("grows irrigated rice and leaves a dry crop unchanged", () => {
     const w = emptyWorld();
     w.set(2, 1, 2, B.Farmland);
@@ -123,6 +126,8 @@ describe("world systems", () => {
   });
 });
 describe("light and entities", () => {
+  beforeEach(()=>{preparedWorld=new World("test",{},false);},20000);
+  afterEach(()=>preparedWorld.dispose());
   it("propagates and removes lantern lighting across chunk edges", () => {
     const w = emptyWorld();
     w.set(15, 3, 3, B.Lantern);

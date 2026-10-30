@@ -1,10 +1,8 @@
-import { generateChunk } from "./generator";
+import { createGenerationSession, type GenerationRequest } from "./generation-protocol";
+const session = createGenerationSession();
 self.onmessage = (
-  event: MessageEvent<{ cx: number; cz: number; seed: string; epoch: number; ticket: number }>,
+  event: MessageEvent<GenerationRequest>,
 ) => {
-  const { cx, cz, seed, epoch, ticket } = event.data;
-  const start = performance.now();
-  const blocks = generateChunk(cx, cz, seed);
-  const sections = blocks.serialize();
-  self.postMessage({ cx, cz, epoch, ticket, sections, elapsedMs:performance.now()-start }, { transfer: sections.flatMap(s=>s.data ? [s.data.buffer as ArrayBuffer] : []) });
+  const result = session.run(event.data);
+  self.postMessage(result, { transfer: result.sections.flatMap(s=>s.data ? [s.data.buffer as ArrayBuffer] : []) });
 };

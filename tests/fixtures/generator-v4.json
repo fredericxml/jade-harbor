@@ -1,0 +1,146 @@
+[
+  {
+    "seed": "jade-harbor",
+    "cx": 0,
+    "cz": -3,
+    "sha256": "c6da34b2396ce55877228d04e2b45555f81f2718b3446f843dfa8a50fe101da6"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": -12,
+    "cz": -12,
+    "sha256": "2785c511e628511664f59494d991f2bf37f66880bf4cd6947f1160cc6a641dd0"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": -16,
+    "cz": 0,
+    "sha256": "015de5504c6c40dde5f15ea2cf0664fbd12d77b262ea3614114d753aacd371fe"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": 10,
+    "cz": -8,
+    "sha256": "b4b6a4e8d45900c1a7a0046c0d6854f756a4184d6d0562c3bdb9170f5225a58f"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": 12,
+    "cz": -16,
+    "sha256": "e32fcfed7bcc5d0b7829b4b0f3068a4f3d6bd66fcf067fdd9f1742f5c9cad9df"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": 12,
+    "cz": 21,
+    "sha256": "e079f1422cf62c89d2887f9c16220c277ac2a2b674dff93dd196f01771a6d58f"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": -18,
+    "cz": 10,
+    "sha256": "3096189e78522f0633ab00451a68dc53e65e1a183bf5407811b7bcb6a9cfd0e7"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": 14,
+    "cz": 10,
+    "sha256": "e11783d99ebcbe459b5e25e6abac2ff404a4991f2adeff9feac9e46dda2e94cc"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": 3,
+    "cz": 12,
+    "sha256": "f3dda0ba2c5b0a375f295651fb8aa833415bb7d04c0140eb5abdfb2ff358debb"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": -18,
+    "cz": -25,
+    "sha256": "ffe12a404082a1b9d0adcad757c0ecfd48c64c3750899876a3198812592a0065"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": 22,
+    "cz": 7,
+    "sha256": "f628adc0708f1e9d6090aa264d4617a6e09bcbebffd5f84aae6234685bc0d338"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": 12,
+    "cz": 33,
+    "sha256": "9203de0173c7fffc653d513f549944577906f067f87474481bc069c5edd9eca5"
+  },
+  {
+    "seed": "different-city",
+    "cx": 0,
+    "cz": -3,
+    "sha256": "3b7a77b7abda9e68f367621d52d359f69346fd37fe2908a6870113f6cd32bdd3"
+  },
+  {
+    "seed": "different-city",
+    "cx": -12,
+    "cz": -12,
+    "sha256": "964f9994844ecc8569ace0b77117bbad0e719920e64bb7140e9593a08a5387e5"
+  },
+  {
+    "seed": "different-city",
+    "cx": -16,
+    "cz": 0,
+    "sha256": "41e8d7ad2af59e1ad6438bdd62345d6548a057872cf62a56d1278524990f05e9"
+  },
+  {
+    "seed": "different-city",
+    "cx": 10,
+    "cz": -8,
+    "sha256": "a32155f935de1238cabb25e4f0f2ae543d28732dd41642cdd429b94f8602f5d4"
+  },
+  {
+    "seed": "different-city",
+    "cx": 12,
+    "cz": -16,
+    "sha256": "196f0b47bc6e911bd6165989761553495646261c0690b522818d350e0c015508"
+  },
+  {
+    "seed": "different-city",
+    "cx": 12,
+    "cz": 21,
+    "sha256": "78edb788eaf175ea395b47d43134be1943d772538ca71e6950554f4efbb3809e"
+  },
+  {
+    "seed": "different-city",
+    "cx": -18,
+    "cz": 10,
+    "sha256": "0c68b530a668aa1c138f23cb922b7ffe96b0993c2513a3cc26a6dc38300f62ae"
+  },
+  {
+    "seed": "different-city",
+    "cx": 14,
+    "cz": 10,
+    "sha256": "039a3e218ca5d8cd6fe49cebef8804fdfae93de7aee5ba2b97a761dfac353fc1"
+  },
+  {
+    "seed": "different-city",
+    "cx": 3,
+    "cz": 12,
+    "sha256": "fd154c2a5d47749ac0f48d4bc4c669e03c53aad0ed9f7b3ba0a5e9d2879ed5f3"
+  },
+  {
+    "seed": "different-city",
+    "cx": -18,
+    "cz": -25,
+    "sha256": "01af6534664798ffaab9d9f134d8b070e6b91d2931586cd2e493e81f96e89a63"
+  },
+  {
+    "seed": "different-city",
+    "cx": 22,
+    "cz": 7,
+    "sha256": "706bdda0990eb9d77fd3c2642afad007be5eb6ac5fb47430d89c517833d87f88"
+  },
+  {
+    "seed": "different-city",
+    "cx": 12,
+    "cz": 33,
+    "sha256": "c86c01253e3751d7d5f2e39849d82063d9cc3b1097b54a3c8744d584abe6c078"
+  }
+]

@@ -39,6 +39,22 @@ function createGame(writer) {
 async function spin() {await Promise.resolve();await Promise.resolve();await new Promise(r=>setImmediate(r));}
 (async()=>{
   let passed=0;const test=async(name,fn)=>{await fn();console.log('PASS',name);passed++;};
+  await test('first Game save initializes a full checkpoint and imported overlay before incremental saves',async()=>{
+    const calls=[];
+    const {g,changes}=createGame(async(state,deltas,revision)=>{calls.push({state,deltas,revision});return calls.length;});
+    changes.clear(); // Imported edits are already indexed but are not dirty mutations.
+    g.snapshot=full=>({edits:full?{'0,35,-45':0}:{},generator:3});
+    assert.equal(await g.save(),true);
+    assert.equal(calls[0].deltas,undefined);
+    assert.deepEqual(calls[0].state.edits,{'0,35,-45':0});
+    assert.equal(calls[0].revision,0);
+    changes.set('0,1,0',2);
+    assert.equal(await g.save(),true);
+    assert.equal(calls[1].deltas.length,1);
+    assert.deepEqual(calls[1].state.edits,{});
+    assert.equal(calls[1].revision,1);
+    assert.equal(calls[1].state.generator,3);
+  });
   await test('100 overlapping save calls coalesce into just two transactions',async()=>{
     const first=deferred();let calls=0;
     const {g}=createGame(async()=>{calls++;return calls===1?first.promise:calls;});

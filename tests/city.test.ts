@@ -92,7 +92,7 @@ describe("city planning and real voxel realization", () => {
     expect(urban).toBeLessThan(0.94);
   });
   it("has a collision-free spawn and a walkable main avenue to Panda Plaza", () => {
-    const w = new World(seed, {}, false);
+    const w = new World(seed, {}, false, 4);
     region(w, -1, -30, 1, 26);
     expect(collides(w, CITY_SPAWN)).toBe(false);
     for (let z = -29; z <= 25; z++)
@@ -102,7 +102,7 @@ describe("city planning and real voxel realization", () => {
       ).toBe(false);
   });
   it("builds the complete 18-block sculpture across chunk edges and attaches every component", () => {
-    const w = new World(seed, {}, false);
+    const w = new World(seed, {}, false, 4);
     region(w, -10, -57, 10, -38);
     for (const [x, y, z, id] of PANDA_VOXELS)
       expect(w.get(x + PANDA.x, y + PANDA.base, z + PANDA.z)).toBe(id);
@@ -136,8 +136,8 @@ describe("city planning and real voxel realization", () => {
     expect(PANDA_VOXELS.some((v) => v[3] === B.PandaMouth)).toBe(true);
   });
   it("generates cross-chunk structures identically in reverse loading order", () => {
-    const a = new World(seed, {}, false),
-      b = new World(seed, {}, false),
+    const a = new World(seed, {}, false, 4),
+      b = new World(seed, {}, false, 4),
       coords = [
         [-1, -3],
         [0, -3],
@@ -165,7 +165,7 @@ describe("city planning and real voxel realization", () => {
       ).toContain(st);
   });
   it("keeps the canal continuously wet between walkable stone bridges", () => {
-    const w = new World(seed, {}, false);
+    const w = new World(seed, {}, false, 4);
     region(w, 138, -180, 150, -100);
     for (let z = -180; z <= -100; z++) {
       const bridge = plan.roads.some(
@@ -185,7 +185,7 @@ describe("city planning and real voxel realization", () => {
     }
   });
   it("rejects stale staged lighting when the world changes during a frame budget", () => {
-    const w = new World("light", {}, false);
+    const w = new World("light", {}, false, 4);
     w.chunks.set("0,0", {
       cx: 0,
       cz: 0,
@@ -199,7 +199,7 @@ describe("city planning and real voxel realization", () => {
     w.set(2, 30, 2, 0);
     let n = 0;
     while (l.pending && n++ < 10000) l.update(0);
-    expect(l.signature).toBe("");
+    expect(l.signature).toBe(-1);
     l.rebuild();
     expect(l.blockLight.size).toBe(0);
   });
@@ -209,7 +209,7 @@ describe("city planning and real voxel realization", () => {
         (s) => s.facing === facing && s.floors === 2 && s.kind === "shophouse",
       )!;
       expect(s).toBeDefined();
-      const w = new World(seed, {}, false);
+      const w = new World(seed, {}, false, 4);
       region(w, s.x1 - 2, s.z1 - 2, s.x2 + 2, s.z2 + 2);
       const width = facing % 2 ? s.z2 - s.z1 + 1 : s.x2 - s.x1 + 1,
         u = width - 2.5;
@@ -243,7 +243,7 @@ describe("city planning and real voxel realization", () => {
     }
   });
   it("retains editable mature rice terraces and wilderness shrine rewards", () => {
-    const w = new World(seed, {}, false);
+    const w = new World(seed, {}, false, 4);
     region(w, 350, 120, 375, 166);
     expect(w.get(352, 21, 121)).toBe(B.Farmland);
     expect(w.get(352, 22, 121) & 255).toBe(B.Rice);
@@ -253,7 +253,7 @@ describe("city planning and real voxel realization", () => {
     expect(w.get(400, y, 80)).toBe(B.Chest);
   });
   it("walks from Panda Plaza up the monument steps without jumping", () => {
-    const w = new World(seed, {}, false);
+    const w = new World(seed, {}, false, 4);
     region(w, -2, -49, 2, -32);
     const body: Body = {
       position: { x: 0.5, y: 21.01, z: -34.5 },
@@ -270,7 +270,7 @@ describe("city planning and real voxel realization", () => {
   });
   it("keeps harvestable natural logs for the existing survival crafting chain", () => {
     let found = false;
-    const w = new World(seed, {}, false);
+    const w = new World(seed, {}, false, 4);
     for (let z = 100; z < 160 && !found; z++)
       for (let x = 420; x < 500 && !found; x++) {
         if (hash(x, z, n + 24) < 0.992 || biomeAt(x, z, n) === "Bamboo Forest")
@@ -287,6 +287,6 @@ describe("city planning and real voxel realization", () => {
     expect(hs.size).toBeGreaterThan(4);
     const c = generateChunk(30, 5, seed);
     expect(c.some((v) => v === B.Grass)).toBe(true);
-    expect(GENERATOR_VERSION).toBe(3);
+    expect(GENERATOR_VERSION).toBe(10);
   });
 });

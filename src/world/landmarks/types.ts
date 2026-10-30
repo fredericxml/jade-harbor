@@ -1,0 +1,34 @@
+import type { Rect } from "../city/plan";
+import type { Footprint, Point } from "../geography/geometry";
+import type { Reservation } from "../geography/landmarks";
+
+export const LANDMARK_IDS = ["imperial-complex", "ridge-fortification", "archaeology", "harbor-front",
+  "mountain-temple", "cliff-grotto", "scenic-landscape", "western-viewpoint"] as const;
+export type LandmarkId = typeof LANDMARK_IDS[number];
+export type ReservationId = `${LandmarkId}-reserve`;
+export type Position = Point & { y: number };
+export type Palette = Readonly<{ wall: number; timber: number; roof: number; accent: number }>;
+export type RoofKind = "hip" | "gable" | "double";
+export type ComponentBase = { id: string; site: LandmarkId; bounds: Rect; order: number };
+export type Plinth = ComponentBase & { kind: "plinth"; footprint: Footprint; level: number; surface: number; clear: number };
+export type Hall = ComponentBase & { kind: "hall"; rect: Rect; level: number; height: number; palette: Palette;
+  roof: RoofKind; open: boolean; canopy: boolean; dais: boolean };
+export type Gate = ComponentBase & { kind: "gate"; rect: Rect; level: number; height: number; palette: Palette; opening: number };
+export type Boundary = ComponentBase & { kind: "boundary"; rect: Rect; level: number; height: number; palette: Palette; entrance: number };
+export type Tower = ComponentBase & { kind: "tower"; center: Point; level: number; width: number; levels: number;
+  story: number; palette: Palette; taper: boolean; stairs: boolean; finial: boolean };
+export type Pit = ComponentBase & { kind: "pit"; rect: Rect; rim: number; floor: number; stairsZ: number | null };
+export type Figure = ComponentBase & { kind: "figure"; center: Point; level: number; variant: number };
+export type Grotto = ComponentBase & { kind: "grotto"; center: Point; level: number };
+export type Garden = ComponentBase & { kind: "garden"; center: Point; level: number; radius: number };
+export type RouteNode = Position & { distance: number };
+export type RouteSegment = ComponentBase & { kind: "route"; a: RouteNode; b: RouteNode; half: number; surface: number;
+  bridge: boolean; rail: boolean; clear: number };
+export type WallSegment = ComponentBase & { kind: "wall"; a: RouteNode; b: RouteNode; half: number };
+export type Component = Plinth | Hall | Gate | Boundary | Tower | Pit | Figure | Grotto | Garden | RouteSegment | WallSegment;
+export type Approach = { id: string; site: LandmarkId; connection: string; nodes: readonly RouteNode[]; half: number; surface: number };
+export type LandmarkInstance = { id: LandmarkId; name: string; reservation: Reservation; level: number; entry: Position;
+  viewpoints: readonly Position[]; publicSpaces: readonly Position[]; componentIds: readonly string[] };
+export type RealizationPlan = { sites: readonly LandmarkInstance[]; components: readonly Component[];
+  byChunk: Map<string, Component[]>; approaches: readonly Approach[]; wallWalk: readonly RouteNode[];
+  diagnostics: { components: number; indexedChunks: number; maxReferences: number; routeNodes: number; maxCut: number; maxFill: number } };

@@ -51,12 +51,12 @@ page.on("console", (m) => {
 });
 try {
   await page.goto(process.env.GAME_URL ?? "http://127.0.0.1:4174/");
-  await page.getByRole("button", { name: "Create a world" }).waitFor();
+  await page.locator('[data-action="new"]').waitFor();
   await page.waitForFunction(() => window.__game?.view.groups.size > 65);
   await page.screenshot({ path: "test-results/menu.png" });
-  await page.getByRole("button", { name: "Create a world" }).click();
+  await page.locator('[data-action="new"]').click();
   await page.locator("#world-name").fill("QA Jade Harbor");
-  await page.getByRole("button", { name: "Enter your world" }).click();
+  await page.locator('[data-action="create"]').click();
   await page.waitForFunction(() => window.__game?.active);
   await page.waitForFunction(
     () =>
@@ -378,10 +378,10 @@ try {
   // Verify the irreversible one-life rule through creation, UI, save and reload.
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "Save & return home" }).click();
-  await page.getByRole("button", { name: "Create a world" }).click();
+  await page.locator('[data-action="new"]').click();
   await page.locator("#world-name").fill("QA One Life");
   await page.locator("#world-mode").selectOption("hardcore");
-  await page.getByRole("button", { name: "Enter your world" }).click();
+  await page.locator('[data-action="create"]').click();
   await page.waitForFunction(
     () => window.__game?.active && window.__game.mode === "hardcore",
   );

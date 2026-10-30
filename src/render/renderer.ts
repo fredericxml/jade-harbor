@@ -5,24 +5,34 @@ import { World } from "../world/world";
 import { meshChunk } from "./mesher";
 import { makeAtlas } from "./atlas";
 import { Metrics } from "../core/metrics";
-import { Vec3, clamp } from "../core/coords";
+import { Vec3 } from "../core/coords";
+import { Atmosphere, makeSky } from "./atmosphere";
+import { DistantWorld } from "./distant-world";
+import { sampleTerrain } from "../world/geography/terrain";
 import { item } from "../game/items";
 export class View {
   renderer: THREE.WebGLRenderer;
   scene = new THREE.Scene();
-  camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.06, 320);
+  camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.06, 960);
   groups = new Map<string, THREE.Group>();
   sections = new Map<string, THREE.Group>();
   deferred = new Set<string>();
   verticalRadius = 64;
   private lastSectionY = Infinity;
-  // Reuse sky colors every frame instead of allocating transient Color objects.
-  private readonly darkSky = new THREE.Color("#102a3d");
-  private readonly clearSky = new THREE.Color("#b9d7d1");
-  private readonly rainSky = new THREE.Color("#8ba5a2");
-  private readonly currentSky = new THREE.Color();
+  private lastSurfaceY = Infinity;
+  readonly atmosphere = new Atmosphere();
+  readonly sky = makeSky(this.atmosphere);
+  distant?: DistantWorld;
+  readonly meshed = new Set<string>();
+  meshRevision = 0;
+  distance = 5;
+  rainExposure=1;
+  private renderWorld?: World;
+  private environmentTime=.23; private weather=false;
   lighting?: Lighting;
   metrics = new Metrics();
+  // The equipment pass resets renderer.info; F3 needs the main world counters.
+  worldRenderStats = { triangles: 0, calls: 0 };
   contextLost = false;
   onContext?: (lost:boolean) => void;
   atlas = makeAtlas();
@@ -52,10 +62,7 @@ export class View {
     this.materials = [
       terrainMaterial(this.atlas.texture),
       terrainMaterial(this.atlas.texture, true),
-      new THREE.MeshBasicMaterial({
-        map: this.atlas.texture,
-        vertexColors: true,
-      }),
+      terrainMaterial(this.atlas.texture, false, true),
     ];
     this.ambient = new THREE.HemisphereLight("#eaf5e3", "#697560", 2.2);
     this.scene.add(this.ambient);
@@ -78,17 +85,10 @@ export class View {
       opacity: 0.65,
     });
     const geo = new THREE.BoxGeometry(1, 1, 1);
-    for (let i = 0; i < 28; i++) {
-      const cloud = new THREE.Mesh(geo, cloudMat);
-      cloud.position.set(
-        (i % 7) * 38 - 114,
-        68 + (i % 3) * 3,
-        Math.floor(i / 7) * 52 - 100,
-      );
-      cloud.scale.set(18 + (i % 4) * 5, 2, 8 + (i % 3) * 4);
-      this.clouds.add(cloud);
-    }
-    this.scene.add(this.clouds);
+    // A shared instanced draw retains all 28 clouds and their original shapes.
+    const cloudBatch=new THREE.InstancedMesh(geo,cloudMat,28),cloudPose=new THREE.Object3D();
+    for(let i=0;i<28;i++) {cloudPose.position.set((i%7)*48-144+((i*17)%23)-12,174+(i%5)*6,Math.floor(i/7)*62-124+((i*11)%31)-15);cloudPose.scale.set(18+(i%4)*5,2,8+(i%3)*4);cloudPose.updateMatrix();cloudBatch.setMatrixAt(i,cloudPose.matrix);}
+    this.clouds.clear();this.clouds.add(cloudBatch);this.scene.add(this.clouds);this.scene.add(this.sky);
     // A compact foreground arm with a separate cuff, palm and gripping thumb.
     // The pieces overlap intentionally; no detached floating hand geometry.
     const armPiece = (size: [number, number, number], color: string,
@@ -252,11 +252,16 @@ export class View {
     this.renderer.setSize(innerWidth, innerHeight);
   }
   rebuild(world: World, budget = 2) {
-    const center=Math.floor(this.camera.position.y/16);
-    if(center!==this.lastSectionY) {
-      this.lastSectionY=center;
-      for(const key of this.deferred) {const [,y]=key.split(",").map(Number);if(Math.abs(y-center)<=Math.ceil(this.verticalRadius/16)){world.dirty.add(key);this.deferred.delete(key);}}
-      for(const key of this.sections.keys()) {const [,y]=key.split(",").map(Number);if(Math.abs(y-center)>Math.ceil(this.verticalRadius/16)){this.removeSection(key);this.deferred.add(key);}}
+    const macro=world.macroPlan,eye=this.camera.position;
+    const surface=macro?sampleTerrain(macro,eye.x,eye.z).elevation:eye.y;
+    const center=Math.floor(eye.y/16),surfaceCenter=eye.y>surface+64?Math.floor(surface/16):center;
+    // Retain the nine sections around the player (including sky builds),
+    // plus at most five surface sections for elevated outdoor views.
+    const inRange=(y:number)=>Math.abs(y-center)<=Math.ceil(this.verticalRadius/16)||(surfaceCenter!==center&&Math.abs(y-surfaceCenter)<=2);
+    if(center!==this.lastSectionY||surfaceCenter!==this.lastSurfaceY) {
+      this.lastSectionY=center;this.lastSurfaceY=surfaceCenter;
+      for(const key of this.deferred) {const [,y]=key.split(",").map(Number);if(inRange(y)){world.dirty.add(key);this.deferred.delete(key);}}
+      for(const key of this.meshed) {const [,y]=key.split(",").map(Number);if(!inRange(y)){this.removeSection(key);this.deferred.add(key);}}
     }
     let n = 0;
     const started = performance.now();
@@ -268,12 +273,11 @@ export class View {
     // are removed or deferred in the same pass.
     const nearest: { key: string; cx: number; sy: number; cz: number; distance: number }[] = [];
     const limit = Math.max(1, Math.floor(budget));
-    const verticalLimit = Math.ceil(this.verticalRadius / 16);
     for (const key of world.dirty) {
       const [cx, sy, cz] = key.split(",").map(Number);
       const ck = `${cx},${cz}`;
       if (!world.chunks.has(ck)) {world.dirty.delete(key);continue;}
-      if (Math.abs(sy - center) > verticalLimit) {
+      if (!inRange(sy)) {
         world.dirty.delete(key);
         this.deferred.add(key);
         continue;
@@ -296,6 +300,7 @@ export class View {
       const meshStarted = performance.now();
       this.removeSection(key);
       const meshData = meshChunk(world, c, this.lighting, sy);
+      if(!this.meshed.has(key)){this.meshed.add(key);this.meshRevision++;}
       if (!meshData.some((data) => data.indices.length > 0)) {
         this.metrics.add("mesh", performance.now()-meshStarted);
         if (++n >= budget || performance.now() - started > 7) break;
@@ -339,6 +344,7 @@ export class View {
     }
   }
   removeSection(key:string) {
+    if(this.meshed.delete(key))this.meshRevision++;
     const g=this.sections.get(key);
     if(g) {g.traverse(o=>{if(o instanceof THREE.Mesh) o.geometry.dispose();});g.removeFromParent();this.sections.delete(key);}
   }
@@ -346,34 +352,43 @@ export class View {
     const [cx,cz]=key.split(",").map(Number);
     for(const sk of this.sections.keys()) {const [x,,z]=sk.split(",").map(Number);if(x===cx && z===cz) this.removeSection(sk);}
     for(const sk of this.deferred) {const [x,,z]=sk.split(",").map(Number);if(x===cx && z===cz)this.deferred.delete(sk);}
+    for(const sk of this.meshed){const [x,,z]=sk.split(",").map(Number);if(x===cx&&z===cz){this.meshed.delete(sk);this.meshRevision++;}}
     this.groups.get(key)?.removeFromParent();this.groups.delete(key);
   }
   clear() {
     for (const k of this.groups.keys()) this.remove(k);
+    this.meshed.clear();this.deferred.clear();this.lastSectionY=Infinity;this.lastSurfaceY=Infinity;this.meshRevision++;
+    this.clearDistant();
   }
-  environment(time: number, rain = false, nightVision = false) {
-    const day = Math.max(0.06, Math.sin(time * Math.PI * 2));
-    const sky = this.currentSky.copy(this.darkSky).lerp(
-      rain ? this.rainSky : this.clearSky,
-      clamp(day * 1.8, 0, 1),
-    );
-    this.scene.background = sky;
-    (this.scene.fog as THREE.Fog).color.copy(sky);
-    this.ambient.intensity = nightVision ? 2.05 : 0.35 + day * 1.7;
-    this.sun.intensity = 0.12 + day * 2.1;
-    this.sun.position.set(
-      Math.cos(time * Math.PI * 2) * 80,
-      Math.sin(time * Math.PI * 2) * 100,
-      30,
-    );
-    this.clouds.position.x = (time * 30) % 30;
-    for (const m of this.materials)
-      if (m instanceof THREE.ShaderMaterial) {
-        m.uniforms.daylight.value = nightVision ? 1 : clamp(day * 1.8, 0, 1);
-        m.uniforms.fogColor.value.copy(sky);
-        m.uniforms.fogNear.value = (this.scene.fog as THREE.Fog).near;
-        m.uniforms.fogFar.value = (this.scene.fog as THREE.Fog).far;
-      }
+  clearDistant() {this.distant?.dispose();this.distant=undefined;this.renderWorld=undefined;}
+  attachWorld(world:World,time:number,rain=false) {
+    if(this.renderWorld===world)return;
+    this.distant?.dispose();this.distant=world.macroPlan?new DistantWorld(world,this.atmosphere):undefined;if(this.distant)this.scene.add(this.distant.group);this.renderWorld=world;
+    this.atmosphere.reset(time,rain,this.distance);
+  }
+  environment(time: number, rain = false, nightVision = false,dt=1/60) {
+    const began=performance.now(),a=this.atmosphere;
+    this.environmentTime=time;this.weather=rain;
+    a.update(time,rain,nightVision,this.distance,dt);
+    const fog=this.scene.fog as THREE.Fog;fog.color.copy(a.fog);fog.near=a.fogNear;fog.far=a.fogFar;
+    (this.scene.background as THREE.Color).copy(a.horizon);
+    this.sky.position.copy(this.camera.position);this.sky.material.uniforms.sunVisibility.value=(1-a.rain)*Math.max(0,a.sunDirection.y)*.8;
+    this.ambient.color.copy(a.light);this.ambient.intensity=a.ambient;
+    this.sun.color.copy(a.light);this.sun.intensity=a.sun;this.sun.position.copy(a.sunDirection).multiplyScalar(100);
+    this.clouds.position.set(this.camera.position.x+a.sunDirection.y*15,0,this.camera.position.z+a.sunDirection.x*8);
+    const cloud=this.clouds.children[0] as THREE.InstancedMesh;const cloudMaterial=cloud.material as THREE.MeshBasicMaterial;cloudMaterial.color.copy(a.cloud);cloudMaterial.opacity=.62+a.rain*.14;
+    const world=this.lighting?.world,eye=this.camera.position,macro=world?.macroPlan;
+    this.rainExposure=this.lighting?.sample(Math.floor(eye.x),Math.floor(eye.y),Math.floor(eye.z))[0]??1;
+    const underground=!!(world?.loaded(eye.x,eye.z)&&macro&&eye.y<sampleTerrain(macro,eye.x,eye.z).height-3&&this.lighting?.sample(Math.floor(eye.x),Math.floor(eye.y),Math.floor(eye.z))[0]===0);
+    this.sky.visible=this.clouds.visible=!underground;
+    for(const m of this.materials)if(m instanceof THREE.ShaderMaterial){const u=m.uniforms;u.daylight.value=a.daylight;u.lightTint.value.copy(a.light);u.waterTint.value.copy(a.water);u.night.value=a.night;u.fogColor.value.copy(a.fog);u.fogNear.value=a.fogNear;u.fogFar.value=a.fogFar;u.fogDetail.value=a.fogDetail;}
+    this.metrics.add("atmosphere",performance.now()-began);
+  }
+  updateDistant(world:World) {
+    this.attachWorld(world,this.environmentTime,this.weather);
+    const began=performance.now();
+    if(this.distant){this.distant.group.visible=this.sky.visible;this.distant.update(this.camera.position,this.meshed,this.atmosphere,this.meshRevision);}
+    this.metrics.add("distant",performance.now()-began);
   }
   target(hit: Vec3 | null) {
     this.outline.visible = !!hit;
@@ -383,6 +398,8 @@ export class View {
     if (this.contextLost) return;
     this.renderer.clear();
     this.renderer.render(this.scene, this.camera);
+    this.worldRenderStats.triangles = this.renderer.info.render.triangles;
+    this.worldRenderStats.calls = this.renderer.info.render.calls;
     if (this.hand.visible) {
       this.renderer.clearDepth();
       this.renderer.render(this.viewmodelScene, this.viewmodelCamera);

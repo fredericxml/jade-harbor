@@ -35,9 +35,9 @@ try {
   page.on("pageerror", (e) => errors.push(e.message));
   await mkdir("test-results/city", { recursive: true });
   await page.goto("http://127.0.0.1:4176");
-  await page.getByRole("button", { name: "Create a world" }).click();
+  await page.locator('[data-action="new"]').click();
   await page.locator("#world-name").fill("Chinatown visual QA");
-  await page.getByRole("button", { name: "Enter your world" }).click();
+  await page.locator('[data-action="create"]').click();
   await page.waitForFunction(() => window.__game?.active);
   const views = [
     ["spawn", [0.5, 21.05, 24.5], [0, 28, -48]],

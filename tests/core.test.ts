@@ -1,7 +1,7 @@
 import { BlockColumn } from "../src/world/sections";
-import { describe, it, expect } from "vitest";
+import { beforeAll, describe, it, expect } from "vitest";
 import { chunkCoord, localCoord, index, packed } from "../src/core/coords";
-import { generateChunk } from "../src/world/generator";
+import { generateChunk, generatorFor } from "../src/world/generator";
 import { World } from "../src/world/world";
 import { B } from "../src/world/blocks";
 import { raycast } from "../src/player/raycast";
@@ -17,6 +17,7 @@ import {
   SaveData,
 } from "../src/persistence/saves";
 describe("coordinates and generation", () => {
+  beforeAll(()=>{generatorFor("seed");generatorFor("other");},20000);
   it("maps negative coordinates without seams", () => {
     expect(chunkCoord(-1)).toBe(-1);
     expect(localCoord(-1)).toBe(15);

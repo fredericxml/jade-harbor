@@ -38,6 +38,7 @@ export type Family =
   | "market-hall"
   | "garden";
 export type Structure = Rect & {
+  baseY?: number;
   id: string;
   kind: Family;
   district: District;
@@ -77,6 +78,10 @@ export function districtAt(x: number, z: number): District {
 export const inCity = (x: number, z: number) =>
   Math.max(Math.abs(x), Math.abs(z)) <= CITY_RADIUS && Math.hypot(x, z) < 436;
 const cache = new Map<string, CityPlan>();
+export function clearCityPlanCache(seed: number) {
+  for (const key of cache.keys()) if (key.startsWith(`${seed}:`)) cache.delete(key);
+}
+export function cityPlanCacheSize() { return cache.size; }
 export function cityNear(x: number, z: number, seed: number): CityPlan | null {
   const ox = Math.round(x / CITY_SPACING) * CITY_SPACING,
     oz = Math.round(z / CITY_SPACING) * CITY_SPACING;

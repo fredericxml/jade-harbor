@@ -1,0 +1,470 @@
+[
+  {
+    "seed": "jade-harbor",
+    "cx": 0,
+    "cz": -27,
+    "sha256": "e81ec531c700ac481711958da97fb5d5def03c6ba9d0f50f32eff647aa9cacb6"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": 1,
+    "cz": -27,
+    "sha256": "f7f48a058146d3b30ae6171e6b32b823a99a58b15f423186e13b6cc46181b00d"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": 10,
+    "cz": -40,
+    "sha256": "c3dd2da4cc4f3e5910838d492b150b6d5b7a6a1f5f6ebd58e73186c6a697dd57"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": 11,
+    "cz": -40,
+    "sha256": "a55dc7822d87d51d607b1a47debb3a9eb15b2f7f32c701e25b516392ca9aaee4"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": -34,
+    "cz": 10,
+    "sha256": "0c6db8a4b716fe3fd3bdb555278f068e54d8277182aa597e8ec8bb68f7ad2e3b"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": -33,
+    "cz": 10,
+    "sha256": "35f552203cf72cb4558394cfa16def0e95416d17187e51fb59d9dea9801d7db8"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": 12,
+    "cz": 21,
+    "sha256": "e079f1422cf62c89d2887f9c16220c277ac2a2b674dff93dd196f01771a6d58f"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": 13,
+    "cz": 21,
+    "sha256": "b50fd17b7252234d89ddeecbbef5f4ebd5327d3d52e3094b1362222102ae380a"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": 38,
+    "cz": -27,
+    "sha256": "fbb5aad22b36b259bcefdad69deb09ca6ff451e247e9a41e0984c7c3580f4625"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": 39,
+    "cz": -27,
+    "sha256": "462ee1fcb80eb48a67684e16de845438d9e489343672a41afbec17d1b9f89213"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": -42,
+    "cz": -16,
+    "sha256": "f5ba5b53d93eb5f45c42a9e2d6317bb599572896a73623f8a653221e9b7acdb8"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": -41,
+    "cz": -16,
+    "sha256": "8a1bc0da4463dd5dcc7c07e9f341e721d499b0d6db1724a1868d0f959462827a"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": -46,
+    "cz": -16,
+    "sha256": "f291fd5a756d56e86651a234cb6d3df69fa3e0bc7c399dfef5a4dee81528317a"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": -45,
+    "cz": -16,
+    "sha256": "1f3ff22efd32fb467b7bdf349dabefba20c63070c1c78e06afdb88ca68f35422"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": -42,
+    "cz": -21,
+    "sha256": "cd948f03307b6de42dabe6d5a972f2cade728759fc102011b5218f1272b5a32c"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": -41,
+    "cz": -21,
+    "sha256": "244cfcb4957f464592696ee54c0e22f19c2836d5d646f489afd7a4cfb941cba2"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": -5,
+    "cz": -12,
+    "sha256": "3e53de200a19fa2856f7a29809bdd9afe1afbdcb615d33bd077f9a1a4fd88689"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": -19,
+    "cz": -19,
+    "sha256": "835c383f08a9cd9916620e1ddf638da923583ba61fd6c606382fcbaa5dd0aaad"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": -19,
+    "cz": -4,
+    "sha256": "f769bc643a323d23a568ad0a7322dba5f77a43ba2a8315a21f31d9ba47d488ff"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": 6,
+    "cz": -12,
+    "sha256": "86ad9e3195a0d29084b7f3aa162731b41e6be5c8b80ea799d70b1bd712aa7f47"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": -5,
+    "cz": -20,
+    "sha256": "7d30825476837e6b3fe715d460f3aac1f8e51bc9cef88820cfe08ae8b710d649"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": 6,
+    "cz": 20,
+    "sha256": "f75e72c6ab358523817bdcc9dea326d08e2e879c9b1a583d4e214d1fb4cdd5b8"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": -19,
+    "cz": 8,
+    "sha256": "27c8a6b92b38f2798190c3989e3584f39d3264c0a071c711d1ecd292a9132a2a"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": 7,
+    "cz": 13,
+    "sha256": "02c9662c4a472d9f72b06963c82679da56dc6204ebcdd35ddcdfb046fc35f2f2"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": -5,
+    "cz": 8,
+    "sha256": "95e48bb0a97cd78d8c6eed27c7695ebe0e9772234871a1912e5ccc6ac4987d6c"
+  },
+  {
+    "seed": "jade-harbor",
+    "cx": -19,
+    "cz": -24,
+    "sha256": "32b59f6f8a0d36fc63e03bfb764ec255663b40c457c5e488c91ee4df73d7f262"
+  },
+  {
+    "seed": "different-city",
+    "cx": 0,
+    "cz": -27,
+    "sha256": "7cb0b0d485360a2d38681aee9caf2cbb1b518d85d9ae1ca3a63c9e075ac5df9f"
+  },
+  {
+    "seed": "different-city",
+    "cx": 1,
+    "cz": -27,
+    "sha256": "3d8e11959f5a13a428a173e139065608708190477746f3a9a6dd368dfb9dac6a"
+  },
+  {
+    "seed": "different-city",
+    "cx": 10,
+    "cz": -39,
+    "sha256": "10e8635b63ee45d543d7e4446cbaa54e7ab9ec021a3ce7b3c5413f88ce98748e"
+  },
+  {
+    "seed": "different-city",
+    "cx": 11,
+    "cz": -39,
+    "sha256": "dfc15351a9be94e31fbdc5b7ba3362efacc05e4ec570fbd3a2bdbce48a57e330"
+  },
+  {
+    "seed": "different-city",
+    "cx": -34,
+    "cz": 10,
+    "sha256": "aab30ec19435eacdea047852d1c5477be8578040281860750aa6b7a42333d57c"
+  },
+  {
+    "seed": "different-city",
+    "cx": -33,
+    "cz": 10,
+    "sha256": "b8cf5471dc5b088084c35c7fdbf6547eb54fb3ccafcf1991eec4f9a4ec1d01d9"
+  },
+  {
+    "seed": "different-city",
+    "cx": 12,
+    "cz": 21,
+    "sha256": "78edb788eaf175ea395b47d43134be1943d772538ca71e6950554f4efbb3809e"
+  },
+  {
+    "seed": "different-city",
+    "cx": 13,
+    "cz": 21,
+    "sha256": "e8260b77e603442f515b91c3c34a8f3889f6ea8aabf58001bd64b2872f601a75"
+  },
+  {
+    "seed": "different-city",
+    "cx": 38,
+    "cz": -27,
+    "sha256": "d47012ffb9986138e584305a944956834a10bd29e4ad1eb2b8f31e925b85cd8f"
+  },
+  {
+    "seed": "different-city",
+    "cx": 39,
+    "cz": -27,
+    "sha256": "ec3ec3f2d1caf58e193d46da3e6e1ba35c1bf8a3d9a602b0f4793e7a67fe0240"
+  },
+  {
+    "seed": "different-city",
+    "cx": -42,
+    "cz": -16,
+    "sha256": "1585f8015a9b6deb7235ea1c625555a352087ffe0d918ff0adadd93a70aa269b"
+  },
+  {
+    "seed": "different-city",
+    "cx": -41,
+    "cz": -16,
+    "sha256": "2900b8368785c3238e045bfbdc30171bb2c3a8febd558b46c2d6c4d8780da6e2"
+  },
+  {
+    "seed": "different-city",
+    "cx": -46,
+    "cz": -16,
+    "sha256": "458aeef8050ff9e3f41b6f61866b6e29574cd77e3ce6627679bd4406f53fcd01"
+  },
+  {
+    "seed": "different-city",
+    "cx": -45,
+    "cz": -16,
+    "sha256": "038ae5a1716b277575c888e95b7caf4fc8518d2115c5f89882a8dc02d8fe5903"
+  },
+  {
+    "seed": "different-city",
+    "cx": -42,
+    "cz": -21,
+    "sha256": "882db847f40827a7e061696afe654a043ddc263cd9a5eeecd9d7a7d9c50aa0eb"
+  },
+  {
+    "seed": "different-city",
+    "cx": -41,
+    "cz": -21,
+    "sha256": "41d54ad43b8e5d0d923ba39fe8b8e348fc6d949b710801565eb7e4239569b20c"
+  },
+  {
+    "seed": "different-city",
+    "cx": -5,
+    "cz": -12,
+    "sha256": "3fceb4bc8d64a1111d824687a7ac5d8e60c4030f82a35ca48dbdb53fc751bb20"
+  },
+  {
+    "seed": "different-city",
+    "cx": -19,
+    "cz": -19,
+    "sha256": "660278861ec36d6bdbacacd2a54a56ea50411e9fdc9857f234f135a75fa13569"
+  },
+  {
+    "seed": "different-city",
+    "cx": -19,
+    "cz": -4,
+    "sha256": "0755c88f1c72871aaad402d3ed07e11e3ee8c82938f1b6bad2c0db3d0b698f3a"
+  },
+  {
+    "seed": "different-city",
+    "cx": 6,
+    "cz": -12,
+    "sha256": "b19fa24e56ff0682aef7c1950ac80d4e3695f83cbd19c33f3f89a7056a2ca9d4"
+  },
+  {
+    "seed": "different-city",
+    "cx": -5,
+    "cz": -20,
+    "sha256": "74d9260747aebdec3f93055e2e871c2607c625c72f6799c3318b66477f63761b"
+  },
+  {
+    "seed": "different-city",
+    "cx": 6,
+    "cz": 20,
+    "sha256": "d93260cf4a4d588c53395fdc6864f1dd42e77f8a83eded058aee6551d59e983d"
+  },
+  {
+    "seed": "different-city",
+    "cx": -19,
+    "cz": 8,
+    "sha256": "1a444771cab66387c1f9a1e51255fc6033834eb5fd8d75cbd477fb8e2e30a619"
+  },
+  {
+    "seed": "different-city",
+    "cx": 7,
+    "cz": 13,
+    "sha256": "0a5ae3ea3911335acf91e996698ff7a7efd00cd28a14eb1b787953c588cad3f0"
+  },
+  {
+    "seed": "different-city",
+    "cx": -5,
+    "cz": 8,
+    "sha256": "debec1d06dc1717c5c538c10c8f60e3d94baebf698abd05024a408513a5ab348"
+  },
+  {
+    "seed": "different-city",
+    "cx": -19,
+    "cz": -24,
+    "sha256": "6546df8298973f57e1358f059799197e0c8a54d94cde3c4358c86d795b799dbc"
+  },
+  {
+    "seed": "长江玉港",
+    "cx": 0,
+    "cz": -27,
+    "sha256": "dc7273a741920f46905e2e65682310d111e9de03742d2571793854632d9c65bb"
+  },
+  {
+    "seed": "长江玉港",
+    "cx": 1,
+    "cz": -27,
+    "sha256": "98b0259d01d01b10dc729a1b37d40cdad8596686876ca01ee087a8514f4f3c9d"
+  },
+  {
+    "seed": "长江玉港",
+    "cx": 10,
+    "cz": -40,
+    "sha256": "c50055e58d1fe9e18a0972c07899a0cb9d06c7d5e43aadf8b7ada0d5985c3d51"
+  },
+  {
+    "seed": "长江玉港",
+    "cx": 11,
+    "cz": -40,
+    "sha256": "52ab060dd1c91fffa39298e26d0f5e86f45e319c8c8935db3ad27bcad23ef2ba"
+  },
+  {
+    "seed": "长江玉港",
+    "cx": -34,
+    "cz": 10,
+    "sha256": "af08e89c8d71f32c9f4996acd20a806dda7a3582d193306814c1cf16ac29cc45"
+  },
+  {
+    "seed": "长江玉港",
+    "cx": -33,
+    "cz": 10,
+    "sha256": "670db2f67cfb3a61284a9eb07c540ee2c633db542f3e583dc468ff7cf3e5eb52"
+  },
+  {
+    "seed": "长江玉港",
+    "cx": 12,
+    "cz": 21,
+    "sha256": "d73a908b77a5e44f1523bf12312d1a5fe6218ccb061d2d819724d68012899a65"
+  },
+  {
+    "seed": "长江玉港",
+    "cx": 13,
+    "cz": 21,
+    "sha256": "7a8ace55f86b95354e5c57c89267c34abd7d9fe593b37e4d47bdaef6b7f857ec"
+  },
+  {
+    "seed": "长江玉港",
+    "cx": 38,
+    "cz": -27,
+    "sha256": "d505d5349854731bb0c27cd9d25c21ab73a9c0bd29f734827fe2134a0257b025"
+  },
+  {
+    "seed": "长江玉港",
+    "cx": 39,
+    "cz": -27,
+    "sha256": "e8d04759a4dbc029a2a6842a40cb4fac2edcc14d75bc495beb596c96e2ee7b98"
+  },
+  {
+    "seed": "长江玉港",
+    "cx": -42,
+    "cz": -16,
+    "sha256": "93bb129603aa6d055c1b694a0800a410931b0c0eb6968cdeba02bd8cf603d8f8"
+  },
+  {
+    "seed": "长江玉港",
+    "cx": -41,
+    "cz": -16,
+    "sha256": "fff80f7712db11b9a6946d4c0aab3f2d122a84f5685bb5595991e792268d8bed"
+  },
+  {
+    "seed": "长江玉港",
+    "cx": -46,
+    "cz": -16,
+    "sha256": "23b88ec597b5f0ccd8d2ae93c15d41b25676fe520e32060b4797dcb8a1250387"
+  },
+  {
+    "seed": "长江玉港",
+    "cx": -45,
+    "cz": -16,
+    "sha256": "3d0b29db54e7bd24417055e504c06e714d20626a67a5ae1f00100a366ea9dc88"
+  },
+  {
+    "seed": "长江玉港",
+    "cx": -42,
+    "cz": -21,
+    "sha256": "651c1bad8b82cf523414f57358ff54338b76b1caa7340bd10bb6201907aa9b79"
+  },
+  {
+    "seed": "长江玉港",
+    "cx": -41,
+    "cz": -21,
+    "sha256": "17f6d66bd85f71e960d2969ad533117bea42778fd1483c1ebe87badc378d23be"
+  },
+  {
+    "seed": "长江玉港",
+    "cx": -5,
+    "cz": -12,
+    "sha256": "ca30d58d612e00d69bda5186b8073be6dac148dbe43d797f615b9e95c2d48690"
+  },
+  {
+    "seed": "长江玉港",
+    "cx": -19,
+    "cz": -19,
+    "sha256": "4987d65d0b5a4e201549c810ff0ccedc749e815a8f7e57bda4756a55b4a03b58"
+  },
+  {
+    "seed": "长江玉港",
+    "cx": -19,
+    "cz": -4,
+    "sha256": "38a397631ea933eefaf7c0ff792e830e684e799dfedc1fd393a8521cf986e095"
+  },
+  {
+    "seed": "长江玉港",
+    "cx": 6,
+    "cz": -12,
+    "sha256": "02bb603aa033b3c6480ceba6551742433bb6095b018570b4d86fde0376f9b174"
+  },
+  {
+    "seed": "长江玉港",
+    "cx": -5,
+    "cz": -20,
+    "sha256": "d2530b3512a5bdef5a5090576002856e2391d54da0dd71655e53bd1e354b9abe"
+  },
+  {
+    "seed": "长江玉港",
+    "cx": 6,
+    "cz": 20,
+    "sha256": "5c27cfab64b30e282ae8b1a3ef5a6aca7c950db54a398039aafec1441321f656"
+  },
+  {
+    "seed": "长江玉港",
+    "cx": -19,
+    "cz": 8,
+    "sha256": "30157ed890b260be43d7b83df4e4f894d0928aa83241c89d5a5945237fbd635b"
+  },
+  {
+    "seed": "长江玉港",
+    "cx": 7,
+    "cz": 13,
+    "sha256": "10d21ab35490359ab2ed764c23dce049422cdb5d263de85885b5c7c51c459268"
+  },
+  {
+    "seed": "长江玉港",
+    "cx": -5,
+    "cz": 8,
+    "sha256": "c98c0832bfd603b7a2a70df692a5fb28be158d36f70856a8a44520be819f7bf0"
+  },
+  {
+    "seed": "长江玉港",
+    "cx": -19,
+    "cz": -24,
+    "sha256": "e38d317f94450ec6c5b3c091bdcbd079d32f122a3cbd1fbd940362ab48c50c59"
+  }
+]

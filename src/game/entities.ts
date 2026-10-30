@@ -9,6 +9,10 @@ import { Navigation, standAt, traversable } from "./navigation/pathfinder";
 import { Profession, PROFESSIONS, residents } from "./professions";
 import { hash } from "../world/noise";
 import { meleeSightBetween, rayBoxDistance } from "./combat";
+import { CityLife } from "./city-life/runtime";
+import { scheduleAt } from "./city-life/schedules";
+import { circuitStart, PRESENCE_BUDGET } from "./city-life/presence";
+import { STREET_LIFE_BUDGET } from "./city-life/street-life";
 export type Entity = {
   id: string;
   kind: "villager" | "panda" | "spirit";
@@ -136,15 +140,50 @@ export class Entities {
   wasNight = false;
   navigation:Navigation;
   interactingId = "";
+  life?: CityLife;
+  private populationInitialized = false;
+  weather = "clear";
+  tickMs = 0;
   constructor(
     public world: World,
     data?: Record<string, unknown>,
+    time = .24,
   ) {
     this.navigation=new Navigation(world);
-    if (Array.isArray(data?.entities)) this.list = data!.entities as Entity[];
-    else this.list=[
-      ...residents(world.seed).map(r=>({...spawnEntity("villager",r.home,r.name),...r})),
-      spawnEntity("panda",{x:14,y:21.1,z:-35},"Bamboo panda"),
+    // An explicitly empty entity component has no resident work to plan.
+    if (world.generatorVersion >= 6 && world.landmarkPlan && (!Array.isArray(data?.entities) || data.entities.length > 0)) this.life = new CityLife(world);
+    this.populationInitialized = !!this.life || data?.cityLifeVersion === 1 || data?.cityLifeVersion === 2 || data?.cityLifeVersion === 3 || data?.cityLifeVersion === 4 || data?.cityLifeVersion === 5;
+    const population = this.life?.plan?.residents;
+    const create = (r: { id: string; name: string; profession: Profession; home: Vec3; workplace: Vec3 }) => {
+      const planned = this.life?.plan?.byId.get(r.id);
+      const schedule = planned ? scheduleAt(r.id,r.profession,planned.district,time) : undefined;
+      const at = planned?.circuit && schedule?.destination !== "home" ? planned.circuit.points[circuitStart(r.id, time, planned.circuit.points.length)] : !planned || schedule?.destination === "home" ? r.home : schedule?.destination === "public" ? planned.public : r.workplace;
+      return { ...spawnEntity("villager", at, r.name), id: r.id, name: r.name, profession: r.profession, home: { ...r.home }, workplace: { ...r.workplace } };
+    };
+    if (Array.isArray(data?.entities)) {
+      this.list = [...data.entities as Entity[]];
+      // Extend an actual Shot 3 resident save once. Removed original residents
+      // stay removed; a current population marker prevents resurrecting deaths.
+      const firstExtension = data.cityLifeVersion === undefined && this.list.some(e => population?.some(r => r.legacy && r.id === e.id));
+      const densityExtension = world.generatorVersion === 7 && data.cityLifeVersion === 1;
+      const regionalExtension = world.generatorVersion >= 9 && data.cityLifeVersion !== 4 && data.cityLifeVersion !== 5;
+      const fabricExtension = world.generatorVersion >= 8 && (data.cityLifeVersion === 1 || data.cityLifeVersion === 2);
+      if (population && (firstExtension || densityExtension || fabricExtension || regionalExtension)) {
+        // An explicit new-layout copy may put an old sidewalk under a wider
+        // building. Rehome its existing identities once at their new authored
+        // routine anchors, preserving health/trades and never touching v7 saves
+        // or later initialized v8 saves. This is not a live-player catch-up.
+        if(fabricExtension||regionalExtension)for(const e of this.list) {
+          const r=this.life?.plan?.byId.get(e.id);if(e.kind!=="villager"||!r)continue;
+          const start=create(r);e.body={...start.body};e.goal={...start.goal};e.home={...r.home};e.workplace={...r.workplace};
+        }
+        const ids = new Set(this.list.map(e => e.id));
+        const limit=world.generatorVersion>=8?STREET_LIFE_BUDGET.saveEntities-6:world.generatorVersion===7?PRESENCE_BUDGET.saveEntities-6:250;
+        for (const r of population) if ((regionalExtension&&data.cityLifeVersion===3?r.id.includes(":region9:"):fabricExtension&&data.cityLifeVersion===2?r.id.startsWith("inhabitant:"):densityExtension||fabricExtension?!!r.neighborhood:!r.legacy) && !ids.has(r.id) && this.list.length < limit) this.list.push(create(r));
+      }
+    } else this.list = [
+      ...(population ?? residents(world.seed, world.cityPlan)).map(create),
+      spawnEntity("panda", { x:14,y:21.1,z:-35 }, "Bamboo panda"),
     ];
     if (Array.isArray(data?.drops)) this.drops = data!.drops as Drop[];
   }
@@ -178,6 +217,7 @@ export class Entities {
     pickup: () => void,
     playerInteractive = true,
   ) {
+    const tickStarted = performance.now();
     this.elapsed += dt;
     this.spawnClock += dt;
     for (const d of this.drops) {
@@ -218,7 +258,14 @@ export class Entities {
       const site = spiritSpawnSite(this.world, player, this.elapsed);
       if (site) this.list.push(spawnEntity("spirit", site, "Wandering spirit"));
     }
-    for (const e of this.list) {
+    this.life?.prepare(this.list, player, time, this.weather === "rain", this.elapsed, this.navigation);
+    const simulated = this.list.filter(e => e.health > 0 && this.world.loaded(e.body.position.x, e.body.position.z) &&
+      distance(e.body.position, player) <= this.radius && (e.kind !== "villager" || !this.life || this.life.active.has(e.id)));
+    const localGrid = new Map<string, Entity[]>();
+    for (const e of simulated) { const p = e.body.position, key = `${Math.floor(p.x / 4)},${Math.floor(p.z / 4)}`;
+      const bin = localGrid.get(key) ?? []; bin.push(e); localGrid.set(key, bin); }
+    const threats = simulated.filter(e => e.kind === "spirit");
+    for (const e of simulated) {
       // Another entity (for example a guard) may have killed this entity
       // earlier in the same tick. Dead actors must not steer or attack once.
       if (e.health <= 0) continue;
@@ -231,10 +278,11 @@ export class Entities {
         e.health -= dt * 3;
         if (e.health <= 0) continue;
       }
-      const danger=e.profession==='guard'?this.list.find(q=>q.kind==='spirit' && q.health>0 && distance(p,q.body.position)<12):undefined;
+      const danger=e.profession==='guard'?threats.find(q=>q.health>0 && distance(p,q.body.position)<12):undefined;
+      const lifeGoal = e.kind === 'villager' ? this.life?.goal(e.id) : undefined;
       if(e.kind==='villager' && e.workplace) {
-        e.goal={...(night ? e.home : e.workplace)};
-        e.state=night?'returning home':'going to work';
+        e.goal={...(lifeGoal ?? (night ? e.home : e.workplace))};
+        e.state=lifeGoal ? (["sleeping","returning home"].includes(this.life!.states.get(e.id)!.activity) ? "returning home" : "walking") : night?'returning home':'going to work';
         if(danger) {e.goal={...danger.body.position};e.state='patrolling';if(distance(p,danger.body.position)<1.8 && e.cooldown<=0 && meleeSightBetween(this.world,p,danger.body.position)){this.applyHit(danger,4,{x:danger.body.position.x-p.x,y:0,z:danger.body.position.z-p.z});e.cooldown=1.2;}}
       }
       const chasing =
@@ -274,22 +322,51 @@ export class Entities {
           if(direct && traversable(this.world,p,direct,false,1.75)) next=direct;
         }
       }
+      // A stationary player occupies real street space. Dense-city pedestrians
+      // take a short supported side step rather than passing through the camera.
+      // Only two local probes are allowed; narrow blocked passages wait normally.
+      if(this.world.generatorVersion>=7 && e.kind==='villager' && playerInteractive && Math.abs(p.y-player.y)<1.5) {
+        const agent=this.navigation.agents.get(e.id);
+        for(let skip=0;agent && skip<4 && agent.index<agent.path.length-1;skip++) {
+          const occupied=agent.path[agent.index],after=agent.path[agent.index+1];
+          if(Math.hypot(occupied.x-player.x,occupied.z-player.z)>=1.1 || !traversable(this.world,p,after))break;
+          agent.index++;next=after;
+        }
+        const ax=p.x-player.x,az=p.z-player.z,d=Math.hypot(ax,az),nx=(next?.x??p.x)-p.x,nz=(next?.z??p.z)-p.z,n=Math.hypot(nx,nz)||1;
+        const ahead=-(ax*nx+az*nz)/n,sideDistance=Math.abs(ax*nz-az*nx)/n;
+        if(d<.9 || d<1.8 && ahead>0 && sideDistance<.85) {
+          const ux=d>.01?ax/d:1,uz=d>.01?az/d:0,preferred=e.id.charCodeAt(e.id.length-1)%2?1:-1;
+          let detour:Vec3|null=null;
+          for(const sign of [preferred,-preferred]) {
+            const outward=d<.9?.75:.2;
+            const q=standAt(this.world,p.x+ux*outward-uz*sign*.7,p.z+uz*outward+ux*sign*.7,p.y);
+            if(q && Math.hypot(q.x-player.x,q.z-player.z)>Math.min(1.1,d+.1) && traversable(this.world,p,q)){detour=q;break;}
+          }
+          next=detour;
+        }
+      }
       e.navStatus=this.navigation.agents.get(e.id)?.status;
       const dx=(next?.x ?? p.x)-p.x,dz=(next?.z ?? p.z)-p.z,len=Math.hypot(dx,dz);
-      const speed=chasing?2.4:following?1.9:e.kind==='panda'?.65:1.5;
+      const speed=chasing?2.4:following?1.9:e.kind==='panda'?.65:this.world.generatorVersion>=8&&e.kind==='villager'?this.life?.plan?.byId.get(e.id)?.circuit?.pace??1.5:1.5;
       if(chasing && distance(p,player)<1.5) {
         v.x=v.z=0;e.state='attack';
         if(e.cooldown<=0 && meleeSightBetween(this.world,p,player,1.4,1.1)){damage(3);e.cooldown=1.2;}
       } else if(next && len>.05 && this.interactingId!==e.id) {
         v.x=dx/len*speed;v.z=dz/len*speed;e.yaw=Math.atan2(dx,dz);
         // Deterministic local yielding prevents two agents pushing indefinitely through one doorway.
-        const crowded=this.list.some(q=>q!==e && q.id<e.id && Math.hypot(q.body.position.x-(p.x+v.x*.4),q.body.position.z-(p.z+v.z*.4))<.55 && Math.abs(q.body.position.y-p.y)<1);
+        let crowded = false;
+        const gx = Math.floor(p.x / 4), gz = Math.floor(p.z / 4);
+        for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++)
+          if ((localGrid.get(`${gx + dx},${gz + dz}`) ?? []).some(q => q !== e && q.id < e.id &&
+            Math.hypot(q.body.position.x - (p.x + v.x * .4), q.body.position.z - (p.z + v.z * .4)) < .55 && Math.abs(q.body.position.y - p.y) < 1)) crowded = true;
         if(crowded) {v.x*=.1;v.z*=.1;}
         if(e.kind==='villager') this.openNearbyDoors(p,next);
       } else {
         v.x=v.z=0;
-        if(e.navStatus==='arrived') e.state=night?'sleeping':e.profession==='guard'?'on watch':'working';
+        if(e.navStatus==='arrived') e.state=lifeGoal ? this.life!.states.get(e.id)!.activity : night?'sleeping':e.profession==='guard'?'on watch':'working';
         if(e.navStatus==='blocked' || e.navStatus==='unloaded') e.state='waiting for route';
+        const facing = this.life?.facing(e.id,p,this.elapsed);
+        if(facing!==undefined && e.navStatus==='arrived') e.yaw += Math.atan2(Math.sin(facing-e.yaw),Math.cos(facing-e.yaw))*Math.min(1,dt*3);
       }
       // AI steering must not erase combat knockback on the next tick.
       if (e.knockback) {
@@ -304,8 +381,9 @@ export class Entities {
       moveBody(this.world, e.body, dt, false, e.kind === "panda" ? 0.9 : 1.75);
     }
     this.list = this.list.filter((e) => e.health > 0);
-    this.navigation.removeMissing(new Set(this.list.map(e=>e.id)));
+    this.navigation.removeMissing(new Set(simulated.filter(e => e.health > 0).map(e=>e.id)));
     this.navigation.tick();
+    this.tickMs = performance.now() - tickStarted;
   }
   openNearbyDoors(p:Vec3,next:Vec3) {
     for(let y=Math.floor(p.y);y<=Math.floor(p.y)+1;y++) for(let z=Math.floor(next.z)-1;z<=Math.floor(next.z)+1;z++) for(let x=Math.floor(next.x)-1;x<=Math.floor(next.x)+1;x++) {
@@ -359,8 +437,12 @@ export class Entities {
   attack(e: Entity, damage: number, dir: Vec3) {
     return this.applyHit(e, damage, dir).status === "killed";
   }
+  dispose() {
+    this.life?.dispose(); this.life = undefined; this.navigation.agents.clear(); this.list = []; this.drops = [];
+  }
   serialize() {
     return {
+      ...(this.populationInitialized ? { cityLifeVersion: this.world.generatorVersion === 10 ? 5 : this.world.generatorVersion === 9 ? 4 : this.world.generatorVersion === 8 ? 3 : this.world.generatorVersion === 7 ? 2 : 1 } : {}),
       entities: structuredClone(this.list),
       drops: structuredClone(this.drops),
     };

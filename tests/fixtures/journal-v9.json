@@ -1,0 +1,365 @@
+[
+  {
+    "id": "discovery:imperial-complex",
+    "title": "Jade Palace",
+    "description": "Gates and courts frame the northern ceremonial axis.",
+    "position": {
+      "x": 0.5,
+      "y": 36.002,
+      "z": -422.5
+    },
+    "radius": 3
+  },
+  {
+    "id": "discovery:ridge-fortification",
+    "title": "Northern Ridge Wall",
+    "description": "The ridge joins watch posts across the mountain crest.",
+    "position": {
+      "x": -159.5,
+      "y": 146.002,
+      "z": -591.5
+    },
+    "radius": 3
+  },
+  {
+    "id": "discovery:archaeology",
+    "title": "Terrace Excavations",
+    "description": "Clay formations emerge beneath the protective canopy.",
+    "position": {
+      "x": -504.5,
+      "y": 22.002,
+      "z": 167.5
+    },
+    "radius": 3
+  },
+  {
+    "id": "discovery:harbor-front",
+    "title": "Harbor Guild Beacon",
+    "description": "The working quay falls away below the beacon deck.",
+    "position": {
+      "x": 200.5,
+      "y": 35.002,
+      "z": 349.5
+    },
+    "radius": 3
+  },
+  {
+    "id": "discovery:mountain-temple",
+    "title": "Cloudstep Sanctuary",
+    "description": "A quiet hall marks the end of the mountain approach.",
+    "position": {
+      "x": -659.5,
+      "y": 77.002,
+      "z": -243.5
+    },
+    "radius": 3
+  },
+  {
+    "id": "discovery:cliff-grotto",
+    "title": "East Cliff Chambers",
+    "description": "Carved chambers share a narrow cliff terrace.",
+    "position": {
+      "x": 620.5,
+      "y": 45.002,
+      "z": -426.5
+    },
+    "radius": 3
+  },
+  {
+    "id": "discovery:scenic-landscape",
+    "title": "Reed Moon Garden",
+    "description": "A short causeway crosses the garden pond.",
+    "position": {
+      "x": -734.5,
+      "y": 77.002,
+      "z": -247.5
+    },
+    "radius": 3
+  },
+  {
+    "id": "discovery:western-viewpoint",
+    "title": "Western Lookout Pagoda",
+    "description": "The western trees frame a sheltered upper outlook.",
+    "position": {
+      "x": -659.5,
+      "y": 88.002,
+      "z": -324.5
+    },
+    "radius": 3
+  },
+  {
+    "id": "discovery:ridge-watch",
+    "title": "Middle Ridge Watch",
+    "description": "A second guardroom rewards the longer wall walk.",
+    "position": {
+      "x": 10.5,
+      "y": 140.002,
+      "z": -613.5
+    },
+    "radius": 3
+  },
+  {
+    "id": "discovery:sanctuary-overlook",
+    "title": "Sanctuary Side Terrace",
+    "description": "The trail opens briefly beside the sanctuary.",
+    "position": {
+      "x": -647.5,
+      "y": 78.002,
+      "z": -249.5
+    },
+    "radius": 1.5
+  },
+  {
+    "id": "discovery:excavation-rim",
+    "title": "Excavation Viewing Rim",
+    "description": "The protected rim reveals the formation of two pits.",
+    "position": {
+      "x": -533.5,
+      "y": 28.002,
+      "z": 136.5
+    },
+    "radius": 2
+  },
+  {
+    "id": "discovery:quay-walk",
+    "title": "The Working Quay",
+    "description": "A low promenade ties the beacon to the warehouses.",
+    "position": {
+      "x": 112.5,
+      "y": 22.002,
+      "z": 340.5
+    },
+    "radius": 3
+  },
+  {
+    "id": "discovery:hutong-route",
+    "title": "Hutong Side Lane",
+    "description": "A quiet residential lane passes between enclosed courts.",
+    "position": {
+      "x": -200.5,
+      "y": 21.002,
+      "z": -19.5
+    },
+    "radius": 2.5
+  },
+  {
+    "id": "discovery:market-route",
+    "title": "Behind the Market",
+    "description": "Narrow back lanes connect the shopfront streets.",
+    "position": {
+      "x": -319.5,
+      "y": 25.002,
+      "z": -185.5
+    },
+    "radius": 2.5
+  },
+  {
+    "id": "discovery:water-town-route",
+    "title": "Canal Bridge",
+    "description": "The crossing joins two rows of water-facing houses.",
+    "position": {
+      "x": 212.5,
+      "y": 21.002,
+      "z": -203.5
+    },
+    "radius": 2.5
+  },
+  {
+    "id": "discovery:scholar-route",
+    "title": "Scholar Garden Path",
+    "description": "The commercial streets give way to garden walks.",
+    "position": {
+      "x": 210.5,
+      "y": 21.002,
+      "z": 204.5
+    },
+    "radius": 2.5
+  },
+  {
+    "id": "discovery:district:panda-plaza",
+    "title": "Panda Plaza",
+    "description": "The monument court at the heart of the city.",
+    "position": {
+      "x": 0.5,
+      "y": 21.002,
+      "z": -9.5
+    },
+    "radius": 10
+  },
+  {
+    "id": "discovery:district:avenue",
+    "title": "Grand Lantern Avenue",
+    "description": "The main commercial and ceremonial street.",
+    "position": {
+      "x": 0.5,
+      "y": 21.002,
+      "z": 24.5
+    },
+    "radius": 10
+  },
+  {
+    "id": "discovery:district:heritage",
+    "title": "Panda Heritage Core",
+    "description": "Civic axis and plaza frame",
+    "position": {
+      "x": 0.5,
+      "y": 21.002,
+      "z": -111.5
+    },
+    "radius": 10
+  },
+  {
+    "id": "discovery:district:market",
+    "title": "Old Market Maze",
+    "description": "Narrow merchant fronts and branching alleys",
+    "position": {
+      "x": -247.5,
+      "y": 25.002,
+      "z": -215.5
+    },
+    "radius": 10
+  },
+  {
+    "id": "discovery:district:hutong",
+    "title": "Hutong Courtyards",
+    "description": "Enclosed low-rise homes and neighborhood lanes",
+    "position": {
+      "x": -143.5,
+      "y": 21.002,
+      "z": -19.5
+    },
+    "radius": 10
+  },
+  {
+    "id": "discovery:district:water-town",
+    "title": "Jade Water Town",
+    "description": "Low timber houses facing canals and bridge plazas",
+    "position": {
+      "x": 132.5,
+      "y": 21.002,
+      "z": -99.5
+    },
+    "radius": 10
+  },
+  {
+    "id": "discovery:district:imperial",
+    "title": "Imperial Quarter",
+    "description": "Formal compounds, deep courts and an open northern axis",
+    "position": {
+      "x": 20.5,
+      "y": 21.002,
+      "z": -235.5
+    },
+    "radius": 10
+  },
+  {
+    "id": "discovery:district:harbor",
+    "title": "Merchant Docks",
+    "description": "Warehouses, cargo courts and quays",
+    "position": {
+      "x": 120.5,
+      "y": 22.002,
+      "z": 340.5
+    },
+    "radius": 10
+  },
+  {
+    "id": "discovery:district:artisan",
+    "title": "Artisan Workyards",
+    "description": "Open work courts, kilns and workshop wings",
+    "position": {
+      "x": -247.5,
+      "y": 25.002,
+      "z": 186.5
+    },
+    "radius": 10
+  },
+  {
+    "id": "discovery:district:scholar",
+    "title": "Scholar Gardens",
+    "description": "Asymmetric garden compounds, ponds and quiet paths",
+    "position": {
+      "x": 200.5,
+      "y": 21.002,
+      "z": 204.5
+    },
+    "radius": 10
+  },
+  {
+    "id": "discovery:district:nightlife",
+    "title": "Lantern Commercial Core",
+    "description": "Vertical mixed use, arcades and roof terraces",
+    "position": {
+      "x": 0.5,
+      "y": 21.002,
+      "z": 188.5
+    },
+    "radius": 10
+  },
+  {
+    "id": "discovery:district:highland",
+    "title": "Northern Terrace Edge",
+    "description": "Supported hillside homes, switchbacks and outlooks",
+    "position": {
+      "x": -223.5,
+      "y": 23.002,
+      "z": -343.5
+    },
+    "radius": 10
+  },
+  {
+    "id": "discovery:region:willow-tulou",
+    "title": "Willow Valley Tulou",
+    "description": "A communal earthen house, village workshops and a valley approach.",
+    "position": {
+      "x": -528.5,
+      "y": 26.002,
+      "z": 399.5
+    },
+    "radius": 6
+  },
+  {
+    "id": "discovery:region:amber-village",
+    "title": "Amber Gate Village",
+    "description": "Western merchant lanes and a walled heritage village beside the excavation road.",
+    "position": {
+      "x": -500.5,
+      "y": 21.002,
+      "z": -53.5
+    },
+    "radius": 6
+  },
+  {
+    "id": "discovery:region:li-stone-walk",
+    "title": "Li River Stone Walk",
+    "description": "Limestone pillars frame an eastern river trail and small lookout tea houses.",
+    "position": {
+      "x": 620.5,
+      "y": 21.002,
+      "z": 435.5
+    },
+    "radius": 6
+  },
+  {
+    "id": "discovery:region:mist-tea-village",
+    "title": "Mist Terrace Tea Village",
+    "description": "A northern hillside settlement with tea terraces and a linked lookout walk.",
+    "position": {
+      "x": -601.5,
+      "y": 24.002,
+      "z": -751.5
+    },
+    "radius": 6
+  },
+  {
+    "id": "discovery:region:lotus-causeway",
+    "title": "Lotus Causeway Gardens",
+    "description": "A southern lake garden, planted banks, low pavilions and crossing causeways.",
+    "position": {
+      "x": -144.5,
+      "y": 25.002,
+      "z": 572.5
+    },
+    "radius": 6
+  }
+]

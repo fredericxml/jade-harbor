@@ -1,0 +1,85 @@
+import {chromium} from 'playwright';
+import {spawn} from 'node:child_process';
+import {mkdir,readFile,writeFile} from 'node:fs/promises';
+import {createHash} from 'node:crypto';
+import assert from 'node:assert/strict';
+import {verifyReleaseManifest} from '../scripts/release-integrity.mjs';
+verifyReleaseManifest();
+const source=createHash('sha256').update(JSON.stringify(JSON.parse(await readFile('dist/release-integrity.json','utf8')).source)).digest('hex');
+const output=process.env.WORLD_INTEGRATION_OUTPUT??'test-results/world-integration',checks=[],tour=[],switches=[],errors=[];
+const server=spawn(process.execPath,['node_modules/vite/bin/vite.js','--host','127.0.0.1','--port','4191','--strictPort'],{stdio:['ignore','pipe','pipe']});let browser,page;
+const pass=x=>{checks.push(x);console.log('CHECK',x);};
+try{
+ await mkdir(output,{recursive:true});await new Promise((ok,no)=>{server.stdout.on('data',d=>{if(d.toString().includes('Local:'))ok();});server.on('error',no);server.on('exit',c=>no(Error('server '+c)));});
+ browser=await chromium.launch({headless:true,args:['--no-sandbox','--use-angle=swiftshader','--enable-unsafe-swiftshader','--disable-dev-shm-usage']});page=await browser.newPage({viewport:{width:960,height:600}});page.setDefaultTimeout(180000);page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error'&&!/context.*lost/i.test(m.text()))errors.push(m.text());});
+ await page.addInitScript(()=>localStorage.setItem('jade-harbor-settings',JSON.stringify({distance:3,simulationDistance:4})));
+ await page.goto('http://127.0.0.1:4191');await page.locator('[data-action="new"]').click();await page.locator('[data-action="create"]').click();await page.waitForFunction(()=>window.__game?.active);await page.waitForFunction(()=>window.__game.view.distant?.stats.ready);
+ // Control only the sampling phase and held input; actual Game ticks own
+ // physics and discovery. Stopping after a valid short walk must not depend
+ // on whether a key happens to be held at the next half-second poll.
+ const shortWalk=await page.evaluate(()=>{
+   const g=window.__game;g.pause();g.mode='creative';g.body.flying=false;g.yaw=0;g.pitch=0;const origin={...g.body.position};g.discoveryClock=.4;g.input.keys.add('KeyW');
+   for(let i=0;i<10;i++)g.tick(.05);g.input.keys.clear();const moved=Math.hypot(g.body.position.x-origin.x,g.body.position.z-origin.z);
+   for(let i=0;i<30;i++)g.tick(.05);g.resume(false);return{moved,grounded:g.body.grounded,discovered:g.discoveries.has('discovery:district:avenue')};
+ });
+ assert(shortWalk.moved>=2&&shortWalk.grounded);assert(shortWalk.discovered,'A short legitimate walk followed by idle must record discovery independently of the collection polling phase');pass('a short real-physics Game walk followed by idle records its discovery across the polling boundary');
+ const initial=await page.evaluate(()=>{const g=window.__game,l=g.view.distant;window.__lodStable={group:l.group.uuid,terrain:l.group.children.map(n=>n.geometry.uuid),texture:l.texture.uuid,buildMs:l.stats.buildMs};return{ids:g.entities.list.filter(e=>e.kind==='villager').map(e=>e.id).sort()};});
+ const hubs=await page.evaluate(async()=>{const{travelDestinations}=await import('/src/game/city-life/travel.ts');return travelDestinations(window.__game.world).map(d=>d.id);});assert.equal(hubs.length,18);
+ for(let lap=0;lap<3;lap++)for(const id of hubs){
+  await page.evaluate(()=>{window.__game.pause();});await page.locator('[data-action="journal"]').click();await page.locator(`[data-action="travel"][data-id="${id}"]`).click();await page.waitForFunction(()=>!window.__game.travelState);
+  const row=await page.evaluate(()=>{const g=window.__game,l=g.view.distant,s=window.__lodStable;return{travel:g.travelMetrics.at(-1),columns:g.world.chunks.size,pending:g.world.pending.size,active:g.entities.life.active.size,total:g.entities.list.length,unique:new Set(g.entities.list.map(e=>e.id)).size,ids:g.entities.list.filter(e=>e.kind==='villager').map(e=>e.id).sort(),stable:l.group.uuid===s.group&&l.texture.uuid===s.texture&&JSON.stringify(l.group.children.map(n=>n.geometry.uuid))===JSON.stringify(s.terrain),geometries:g.view.renderer.info.memory.geometries};});
+  assert(row.travel.success&&row.travel.ms<3000);assert(row.stable,'Travel must never reconstruct distant meshes');assert.equal(row.total,row.unique);assert.deepEqual(row.ids,initial.ids);assert(row.active<=96&&row.pending<=8&&row.columns<=256);delete row.ids;tour.push({lap,id,...row});
+ }
+ pass('54 actual UI hub trips reuse one distant graph and retain identities, caps and the 3-second preparation boundary');
+ const cancelled=await page.evaluate(async()=>{const g=window.__game;let count=0;for(let i=0;i<8;i++){const p=g.travelTo('district:market');g.key('Escape');const q=g.travelTo('district:harbor');if(await p||!(await q))throw Error('cancel/replace failed');count++;}return{count,metrics:g.travelMetrics.length,locks:!!g.travelState};});assert.equal(cancelled.count,8);assert(cancelled.metrics<=120&&!cancelled.locks);pass('eight cancel/replacement pairs leave no stale arrival or modal');
+ const durable=await page.evaluate(async()=>{
+  const g=window.__game,{travelDestinations}=await import('/src/game/city-life/travel.ts');const edits=[];
+  for(const id of['district:heritage','district:market','landmark:archaeology','region:willow-tulou']){
+   if(!(await g.travelTo(id)))throw Error('edit visit failed '+id);g.pause();const p={x:Math.floor(g.body.position.x)+3,y:Math.floor(g.body.position.y)+5,z:Math.floor(g.body.position.z)+3};g.world.set(p.x,p.y,p.z,22);edits.push({...p,value:22});if(!(await g.save()))throw Error('edit save failed');
+  }
+  return{id:g.meta.id,edits,version:g.world.generatorVersion};
+ });assert.equal(durable.version,10);
+ await page.evaluate(()=>window.__game.pause());const downloadEvent=page.waitForEvent('download');await page.locator('[data-action="export"]').click();const download=await downloadEvent;const backup=`${output}/roundtrip.jadeharbor.json`;await download.saveAs(backup);const exported=JSON.parse(await readFile(backup,'utf8'));assert.equal(exported.generator,10);
+ await page.locator('[data-action="menu"]').click();await page.waitForFunction(()=>!window.__game.active);const beforeImport=await page.evaluate(()=>window.__game.saves.map(s=>s.id));const chooserEvent=page.waitForEvent('filechooser');await page.locator('[data-action="import"]').click();const chooser=await chooserEvent;await chooser.setFiles(backup);await page.waitForFunction(ids=>window.__game.saves.some(s=>!ids.includes(s.id)),beforeImport);
+ const imported=await page.evaluate(async ids=>{const {loadSave}=await import('/src/persistence/saves.ts'),s=window.__game.saves.find(s=>!ids.includes(s.id));return await loadSave(s.id);},beforeImport);assert.notEqual(imported.id,exported.id);assert.equal(imported.generator,10);assert.deepEqual(imported.edits,exported.edits);assert.deepEqual(imported.achievements,exported.achievements);assert.deepEqual(imported.simulation.entities.map(e=>e.id).sort(),exported.simulation.entities.map(e=>e.id).sort());durable.imported=imported.id;
+ await page.reload();await page.locator(`[data-action="load"][data-id="${durable.id}"]`).click();await page.waitForFunction(()=>window.__game.active);assert(await page.evaluate(s=>s.edits.every(p=>window.__game.world.edits.get(`${p.x},${p.y},${p.z}`)===p.value),durable));pass('Panda/city/landmark/region edits survive travel, save, reload and actual UI backup export/import');
+ // Observe every owned render disposal, without retaining GPU objects in the report.
+ for(const[version,seed]of [[9,'jade-harbor'],[10,'different-city'],[3,'jade-harbor'],[4,'jade-harbor'],[5,'jade-harbor'],[6,'jade-harbor'],[7,'jade-harbor'],[8,'jade-harbor'],[10,'jade-harbor'],[9,'different-city'],[10,'jade-harbor']]){
+  console.log('SWITCH',version,seed);
+  const row=await page.evaluate(async({version,seed})=>{
+   const g=window.__game,old=g.world,lod=g.view.distant,expectedGeometry=lod?.group.children.filter(n=>n.geometry).length??0;let geometry=0,material=0,texture=0;
+   if(lod){lod.group.traverse(n=>{if(n.geometry)n.geometry.addEventListener('dispose',()=>geometry++);});lod.material.addEventListener('dispose',()=>material++);lod.texture.addEventListener('dispose',()=>texture++);}
+   const {freshWorld}=await import('/src/persistence/saves.ts'),s=freshWorld('World switch regression',seed,'creative');s.generator=version;s.time=.78;await g.start(s);g.pause();
+   return{version:g.world.generatorVersion,seed:g.world.seed,oldPlans:old.planCount,oldColumns:old.chunks.size,oldPending:old.pending.size,oldGroup:lod?.group.children.length??0,hadLOD:!!lod,expectedGeometry,geometry,material,texture,newBoxes:g.view.distant?.stats.anchorBoxes??0,groups:g.view.scene.children.filter(n=>n.name==='render-only-distant-world').length,phase:g.view.atmosphere.phase,weather:g.simulation.weather};
+  },{version,seed});
+  assert.equal(row.version,version);assert.equal(row.seed,seed);assert.equal(row.oldPlans+row.oldColumns+row.oldPending+row.oldGroup,0);if(row.hadLOD){assert.equal(row.geometry,row.expectedGeometry);assert.equal(row.material,1);assert.equal(row.texture,1);}assert.equal(row.groups,version===3?0:1);if(version<6)assert.equal(row.newBoxes,0);switches.push(row);
+ }
+ pass('v9→v10→v3 and all v3–v10 worlds switch seeds without stale proxies; old owned meshes/material/texture/plan are released');
+ // A high player-made platform must stay visible alongside the extra surface window.
+ await page.evaluate(()=>{const g=window.__game;g.settings.distance=3;g.applySettings();for(let z=-1;z<=1;z++)for(let x=-1;x<=1;x++)g.world.set(x,200,z,39);const p={x:.5,y:201.002,z:.5};g.body.position={...p};g.previous={...p};g.body.velocity={x:0,y:0,z:0};g.body.flying=true;g.yaw=0;g.pitch=-.9;g.resume(false);});
+ await page.waitForFunction(()=>window.__game.view.sections.has('0,12,0'));assert(await page.evaluate(()=>window.__game.world.get(0,200,0)===39));
+ await page.screenshot({path:`${output}/sky-platform.png`});pass('high sky edits remain actual visible geometry; the surface window does not replace the player window');
+ // Continuous real input at maximum distance, in rain, with camera turns.
+ await page.locator('canvas#game').click();await page.waitForFunction(()=>window.__game.input.locked);const flight=await page.evaluate(()=>{const g=window.__game;g.settings.distance=8;g.applySettings();g.simulation.weather='rain';g.simulation.weatherTimer=900;g.time=.48;g.yaw=0;g.pitch=0;return{...g.body.position};});
+ await page.keyboard.down('KeyW');await page.keyboard.down('ShiftLeft');for(let i=0;i<10;i++){await page.mouse.move(480+((i%2)*2-1)*160,300,{steps:2});await page.waitForTimeout(1000);}await page.keyboard.up('KeyW');await page.keyboard.up('ShiftLeft');
+ const flown=await page.evaluate(p=>{const g=window.__game;return{moved:Math.hypot(g.body.position.x-p.x,g.body.position.z-p.z),columns:g.world.chunks.size,pending:g.world.pending.size,dirty:g.world.dirty.size,active:g.entities.life.active.size,lod:g.view.distant.stats,atmosphere:g.view.metrics.summary('atmosphere'),distant:g.view.metrics.summary('distant')};},flight);assert(flown.moved>10);assert(flown.pending<=8&&flown.columns<=445&&flown.active<=96);assert(flown.lod.ready);pass('real-input fast flight and rapid turns at maximum distance in rain retain bounded streaming and the distant graph');
+ // A stated near-beacon camera fixture stresses the ordinary inventory modal
+ // while the max-distance rain stream is recovering, then resumes at night.
+ await page.evaluate(()=>{const g=window.__game,p={x:120.5,y:21.002,z:340.5};g.body.position={...p};g.previous={...p};g.body.velocity={x:0,y:0,z:0};g.time=.45;g.resume(false);});
+ await page.keyboard.press('KeyE');await page.waitForFunction(()=>window.__game.ui.screen==='inventory');
+ assert(await page.evaluate(()=>window.__game.ui.overlay.textContent.length>100));await page.screenshot({path:`${output}/inventory-transition.png`});
+ await page.evaluate(()=>{window.__game.time=.75;});await page.keyboard.press('Escape');await page.waitForFunction(()=>window.__game.ui.screen==='none');await page.waitForFunction(()=>window.__game.view.atmosphere.phase==='night');
+ assert(await page.evaluate(()=>{const g=window.__game,a=g.view.atmosphere;return g.world.pending.size<=8&&g.entities.life.active.size<=96&&g.view.distant.stats.ready&&[a.fogNear,a.fogFar,a.horizon.r,a.horizon.g,a.horizon.b].every(Number.isFinite);}));
+ pass('inventory opens during maximum-distance rain streaming near the beacon and closes into a finite night scene');
+ await page.keyboard.press('Escape');await page.waitForFunction(()=>window.__game.ui.screen==='pause');await page.locator('[data-action="journal"]').click();assert.equal(await page.locator('[data-action="travel"]').count(),18);await page.setViewportSize({width:390,height:844});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await page.screenshot({path:`${output}/mobile-transition.png`});await page.setViewportSize({width:960,height:600});pass('pause/Journal and resize remain usable after rain/flight streaming');
+ // Underground geometry is found in real saved columns. No artificial cave is carved.
+ const cave=await page.evaluate(async()=>{const g=window.__game,{standAt}=await import('/src/game/navigation/pathfinder.ts');g.settings.distance=3;g.applySettings();g.world.ensure(0,0,true);for(let y=-10;y>=-52;y--)for(let z=1;z<15;z++)for(let x=1;x<15;x++){const p=standAt(g.world,x+.5,z+.5,y,false);if(p&&p.y<0)return p;}return null;});assert(cave,'expected a naturally generated cave fixture');
+ await page.evaluate(p=>{const g=window.__game;g.body.position={...p};g.previous={...p};g.body.velocity={x:0,y:0,z:0};g.body.flying=true;g.time=.24;g.simulation.weather='rain';g.simulation.weatherTimer=900;g.view.atmosphere.reset(g.time,true,3);g.resume(false);},cave);
+ await page.waitForFunction(()=>!window.__game.view.sky.visible&&!window.__game.view.distant.group.visible&&!window.__game.effects.rain.visible);await page.screenshot({path:`${output}/underground-rain.png`});pass('natural cave keeps sky, distant world and outdoor rain out while preserving voxel lighting');
+ // Night vision, real held item and HUD share the current renderer.
+ await page.evaluate(async()=>{const g=window.__game;if(!(await g.travelTo('district:heritage')))throw Error('night vision setup');g.time=.75;g.simulation.weather='rain';g.simulation.weatherTimer=900;g.status.apply('night_vision');});await page.waitForFunction(()=>window.__game.view.atmosphere.daylight===1);assert(await page.evaluate(()=>window.__game.view.hand.visible));await page.screenshot({path:`${output}/night-vision-rain.png`});pass('night vision in rain retains the separate held-item pass, HUD and bounded emissive hierarchy');
+ // Exercise actual WebGL resource restoration, not a simulated method call.
+ const supported=await page.evaluate(()=>{const g=window.__game,ext=g.view.renderer.getContext().getExtension('WEBGL_lose_context');if(!ext)return false;window.__restoreContext=ext;ext.loseContext();return true;});assert(supported,'software WebGL2 exposes context restoration');await page.waitForFunction(()=>window.__game.view.contextLost);await page.evaluate(()=>window.__restoreContext.restoreContext());await page.waitForFunction(()=>!window.__game.view.contextLost);await page.waitForFunction(()=>window.__game.view.distant?.stats.ready);assert(await page.evaluate(()=>!window.__game.view.renderer.getContext().isContextLost()));pass('actual WebGL context loss/restoration recreates distant resources and keeps the current world');
+ await page.evaluate(()=>window.__game.pause());await page.locator('[data-action="menu"]').click();await page.waitForFunction(()=>!window.__game.active);assert(await page.evaluate(()=>!window.__game.view.distant&&window.__game.view.scene.children.every(n=>n.name!=='render-only-distant-world')));pass('returning home releases all world-specific distant resources');
+ assert.deepEqual(errors,[]);verifyReleaseManifest();await writeFile(`${output}/results.json`,JSON.stringify({status:'passed',source,checks,tour,switches,cancelled,durable,flown,shortWalk,errors,note:'Actual UI travel, held keyboard/mouse flight, save/reload/export/import, naturally generated cave and real WebGL context lifecycle. Player camera fixtures are stated; no resident positions or generated world metadata are injected.'},null,2));
+}catch(e){if(page)await page.screenshot({path:`${output}/failure.png`}).catch(()=>{});await writeFile(`${output}/failure.json`,JSON.stringify({error:String(e),source,checks,tour,switches,errors},null,2));throw e;}finally{await browser?.close();server.kill();}

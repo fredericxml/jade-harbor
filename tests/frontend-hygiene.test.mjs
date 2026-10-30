@@ -73,6 +73,9 @@ assert.doesNotMatch(sourceHtml, /javascript:/i);
 assert.match(sourceHtml, /<div id="app"><\/div>/);
 
 const pkg = JSON.parse(readFileSync("package.json", "utf8"));
-assert.equal(pkg.version, "1.0.0", "frontend refactors must not bump the release version");
+const lock = JSON.parse(readFileSync("package-lock.json", "utf8"));
+assert.equal(pkg.version, "2.0.0", "final release must retain its explicit release version");
+assert.equal(lock.version, pkg.version);
+assert.equal(lock.packages[""].version, pkg.version);
 
-console.log("PASS frontend CSS/HTML hygiene and v1.0.0 lock");
+console.log("PASS frontend CSS/HTML hygiene and release version consistency");

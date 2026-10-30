@@ -1,6 +1,6 @@
 # Engine reliability and persistence
 
-Jade Harbor treats persistence and world lifecycle behavior as engine contracts rather than UI conventions. This work strengthens the initial `v1.0.0` baseline without introducing an incompatible save-format migration.
+Jade Harbor treats persistence and world lifecycle behavior as engine contracts rather than UI conventions. The `2.0.0` release strengthens the original persistence design without introducing an incompatible save-format migration.
 
 ## Persistence contract
 
@@ -16,13 +16,13 @@ Current invariants:
 - checkpoint records and stored chunk metadata are validated before reconstruction, including section coordinates, revision range, schema/version, manifest checksum shape, and record ownership;
 - validation returns a sanitized clone and never mutates the caller's save object while truncating supported world name/seed lengths.
 
-The save format remains `jade-harbor-engine`, format version `1`, generator version `3`, database `jade-harbor-engine-v1`, IndexedDB version `1`. This strengthens the existing baseline without migrating to a new incompatible format.
+The save format remains `jade-harbor-engine`, format version `1`, supported generator versions `3`–`10`, database `jade-harbor-engine-v1`, and IndexedDB version `1`. New worlds use generator 10; older saves retain their stored generator. This strengthens the existing baseline without migrating to a new incompatible format.
 
 ## Atomic save and recovery
 
 Normal writes use the serial game-level save queue and one IndexedDB transaction spanning every persistence store. Incremental writes require a valid existing checkpoint before reusing its unchanged chunk manifest.
 
-Reset is also a real destructive recovery path. It reads independently stored world metadata, constructs a fresh deterministic world with the same name, seed, mode, and id, then atomically replaces all component, chunk, and checkpoint records in one transaction. If the metadata itself is damaged, recovery refuses to guess the seed or mode and requires a known-good backup or deletion.
+Reset is also a real destructive recovery path. It reads independently stored world metadata, constructs a fresh deterministic world with the same name, seed, generator, mode, and id, then atomically replaces all component, chunk, and checkpoint records in one transaction. If the metadata itself is damaged, recovery refuses to guess the seed or mode and requires a known-good backup or deletion.
 
 No delete-then-create recovery sequence is used. If the replacement transaction aborts, IndexedDB preserves the prior records.
 
@@ -72,7 +72,12 @@ The full local release gate is:
 ```bash
 npm ci
 npm run test:release
-npm run verify:dist
 ```
 
 Only a zero exit status from the release gate should be treated as approval to publish a newly built `dist/`.
+
+## World foundation compatibility
+
+World generation now carries the saved generator version through worker requests/results, synchronous generation and Game snapshots. It rejects wrong-version/stale results and preserves legacy generator output against pre-change hash fixtures. Generator and seed identity cannot be changed by an ordinary write. The revision-zero Game commit creates a full checkpoint; incremental commits still require an existing valid checkpoint. The regression for this boundary also checks imported edits that were never marked dirty.
+
+Simulation work queued by a block edit must itself be persistable before any update tick runs. `Simulation.changed()` excludes the immutable bedrock layer and out-of-world neighbors, including the upper and horizontal limits. Immediate boundary-edit save regressions cover the lower/upper world limits; schema validation remains strict.

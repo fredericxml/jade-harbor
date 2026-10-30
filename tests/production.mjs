@@ -42,9 +42,9 @@ try {
     if (r.status() >= 400) errors.push(`${r.status()} ${r.url()}`);
   });
   await page.goto(process.env.PRODUCTION_URL ?? "http://127.0.0.1:4175");
-  await page.getByRole("button", { name: "Create a world" }).click();
+  await page.locator('[data-action="new"]').click();
   await page.locator("#world-name").fill("Production smoke");
-  await page.getByRole("button", { name: "Enter your world" }).click();
+  await page.locator('[data-action="create"]').click();
   await page.waitForFunction(() => !!document.pointerLockElement);
   await page.locator(".location strong").waitFor();
   assert.equal(
@@ -61,7 +61,7 @@ try {
   );
   await page.keyboard.press("KeyE");
   await page.getByPlaceholder("Find a block or item…").fill("lantern");
-  await page.getByRole("button", { name: "Festival lantern" }).click();
+  await page.locator('.catalog-item[title="Festival lantern"]').click();
   await page.keyboard.press("KeyE");
   await page.waitForFunction(() => !!document.pointerLockElement);
   await page.keyboard.press("Escape");

@@ -8,8 +8,10 @@ import {
   blockKey,
 } from "../core/coords";
 import { BlockColumn, SectionData } from "./sections";
-import { generateChunk } from "./generator";
+import { createGenerator, clearGeneratorCache, GENERATOR_VERSION, requireGeneratorVersion, type Generator, type GeneratorVersion } from "./generator";
 import { B } from "./blocks";
+import { urbanAt } from "./metropolis/plan";
+import { landmarkAt } from "./landmarks/builders";
 export type Chunk = {
   cx: number;
   cz: number;
@@ -25,6 +27,19 @@ export class World {
   private editSequence = 0;
   private editChunks = new Map<string, Map<string, number>>();
   private worker?: Worker;
+  private generator?: Generator;
+  readonly generatorVersion: GeneratorVersion;
+  private disposed = false;
+  inspectTerrain(x: number, z: number) { return this.generator?.inspect?.(x, z); }
+  get cityPlan() { return this.generator?.city; }
+  get macroPlan() { return this.generator?.plan; }
+  get metropolisPlan() { return this.generator && "metropolis" in this.generator ? this.generator.metropolis : undefined; }
+  inspectDistrict(x:number,z:number) { const plan=this.metropolisPlan;return plan?urbanAt(plan,x,z):undefined; }
+  get landmarkPlan() { return this.generator && "realization" in this.generator ? this.generator.realization : undefined; }
+  get densityPlan() { return this.generator && "density" in this.generator ? this.generator.density : undefined; }
+  get regionalPlan() { return this.generator && "regions" in this.generator ? this.generator.regions : undefined; }
+  inspectLandmark(x:number,z:number) { const plan=this.landmarkPlan;return plan?landmarkAt(plan,x,z):undefined; }
+  get planCount() { return this.generator?.plan ? 1 : 0; }
   private epoch = 0;
   private ticket = 0;
   private tickets = new Map<string, number>();
@@ -37,7 +52,10 @@ export class World {
     public seed: string,
     edits: Record<string, number> = {},
     worker = true,
+    version: number = GENERATOR_VERSION,
   ) {
+    this.generatorVersion = requireGeneratorVersion(version);
+    this.generator = createGenerator(seed, version);
     this.edits = new Map(Object.entries(edits));
     for (const [key, value] of this.edits) this.indexEdit(key, value);
     if (worker && typeof Worker !== "undefined") {
@@ -47,7 +65,7 @@ export class World {
       );
       this.worker.onmessage = (e) => {
         const key = chunkKey(e.data.cx, e.data.cz);
-        if (e.data.epoch === this.epoch && this.tickets.get(key) === e.data.ticket) {
+        if (!this.disposed && e.data.generator === this.generatorVersion && e.data.epoch === this.epoch && this.tickets.get(key) === e.data.ticket) {
           this.onGeneration?.(e.data.elapsedMs);
           this.accept(e.data.cx, e.data.cz, BlockColumn.from(e.data.sections as SectionData[]));
         }
@@ -61,6 +79,7 @@ export class World {
     }
   }
   accept(cx: number, cz: number, blocks: BlockColumn) {
+    if (this.disposed) return;
     const key = chunkKey(cx, cz);
     if (!this.pending.has(key) && this.chunks.has(key)) return;
     for(let sy=MIN_SECTION;sy<=MAX_SECTION;sy++) for (const [k, v] of this.editChunks.get(sectionKey(cx,sy,cz)) ?? []) {
@@ -74,6 +93,8 @@ export class World {
     this.markDirty(cx, cz);
   }
   ensure(cx: number, cz: number, sync = false) {
+    if (this.disposed) return;
+    if (!Number.isSafeInteger(cx) || !Number.isSafeInteger(cz) || Math.abs(cx) > 625000 || Math.abs(cz) > 625000) throw new Error("Invalid chunk coordinate.");
     const key = chunkKey(cx, cz);
     if (this.chunks.has(key) || (this.pending.has(key) && !sync)) return;
     this.pending.add(key);
@@ -81,9 +102,9 @@ export class World {
       {
         const ticket = ++this.ticket;
         this.tickets.set(key,ticket);
-        this.worker.postMessage({ cx, cz, seed: this.seed, epoch: this.epoch, ticket });
+        this.worker.postMessage({ cx, cz, seed: this.seed, generator: this.generatorVersion, epoch: this.epoch, ticket });
       }
-    else this.accept(cx, cz, generateChunk(cx, cz, this.seed));
+    else this.accept(cx, cz, this.generator!.generate(cx, cz));
   }
   get(x: number, y: number, z: number) {
     x = Math.floor(x);
@@ -177,6 +198,18 @@ export class World {
       for (let dx = -radius; dx <= radius; dx++)
         if (dx * dx + dz * dz <= (radius + 0.5) ** 2)
           positions.push([cx + dx, cz + dz, dx * dx + dz * dz + 0.7*(dx*Math.sin(yaw)+dz*Math.cos(yaw))]);
+    // A nearby monument must not lose half its body at the circular streaming
+    // edge. At most four ordinary columns complete the Panda and its plinth;
+    // requests still use the existing worker/backpressure budgets. V3–v7 keep
+    // their released residency policy, and leaving the area releases the pin.
+    const feature = new Set<string>(), panda=this.generatorVersion>=8?this.metropolisPlan?.panda:undefined;
+    if(panda) {
+      const px=(panda.x1+panda.x2)/2,pz=(panda.z1+panda.z2)/2;
+      if(Math.hypot(x-px,z-pz)<=64)for(let b=chunkCoord(pz-6);b<=chunkCoord(pz+7);b++)for(let a=chunkCoord(px-9);a<=chunkCoord(px+9);a++) {
+        feature.add(chunkKey(a,b));
+        if(!positions.some(p=>p[0]===a&&p[1]===b))positions.push([a,b,(a-cx)**2+(b-cz)**2]);
+      }
+    }
     positions.sort((a, b) => a[2] - b[2]);
     for (const [a, b] of positions) {
       if (this.evictionBlocked > 64 || this.pending.size >= 8 || requests >= 4) break;
@@ -190,13 +223,13 @@ export class World {
     this.evictionBlocked = 0;
     for (const key of this.pending) {
       const [a,b]=key.split(",").map(Number);
-      if(Math.abs(a-cx)>radius+2 || Math.abs(b-cz)>radius+2) { this.pending.delete(key); this.tickets.delete(key); }
+      if(!feature.has(key)&&(Math.abs(a-cx)>radius+2 || Math.abs(b-cz)>radius+2)) { this.pending.delete(key); this.tickets.delete(key); }
     }
     for (const [k, c] of this.chunks)
-      if (
+      if (!feature.has(k) && (
         Math.abs(c.cx - cx) > radius + 2 ||
         Math.abs(c.cz - cz) > radius + 2
-      ) {
+      )) {
         // Unsaved edits are an engine-level durability invariant, not a UI
         // callback convention. Always pin the column until its captured
         // sequence commits; the callback only requests an earlier save.
@@ -211,6 +244,9 @@ export class World {
     return removed;
   }
   dispose() {
+    this.disposed = true;
+    this.generator = undefined;
+    clearGeneratorCache(this.seed);
     this.epoch++;
     this.worker?.terminate();
     this.worker = undefined;

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { beforeAll,afterAll,describe,it,expect,vi } from "vitest";
 import "fake-indexeddb/auto";
 import {
   freshWorld,
@@ -90,9 +90,12 @@ describe("schema 1 atomic chunk delta saves", () => {
     expect(saved.time).toBe(0.4);
     expect(saved.edits["1,25,1"]).toBe(B.Gold);
   });
+  describe("edited Panda fixture",()=>{
+    let d:ReturnType<typeof freshWorld>,w:World;
+    beforeAll(()=>{d=freshWorld("sculpture","jade-harbor","creative");w=new World(d.seed,{},false);},20000);
+    afterAll(()=>w.dispose());
   it("preserves explicit removals while evicting, generating and reloading a panda chunk", async () => {
-    const d = freshWorld("sculpture", "jade-harbor", "creative"),
-      w = new World(d.seed, {}, false);
+
     w.ensure(0, -3, true);
     expect(w.get(0, 35, -45)).not.toBe(0);
     w.set(0, 35, -45, 0);
@@ -105,7 +108,8 @@ describe("schema 1 atomic chunk delta saves", () => {
       newWorld = new World(restored.seed, restored.edits, false);
     newWorld.ensure(0, -3, true);
     expect(newWorld.get(0, 35, -45)).toBe(0);
-    expect(newWorld.get(1, 35, -45)).toBe(B.Jade);
+    expect(newWorld.get(1, 35, -45)).toBe(B.Jade);newWorld.dispose();
+  });
   });
   it("surfaces database failures and retains a retryable dirty edit buffer", async () => {
     const d = freshWorld("failure", "a", "creative"),
@@ -119,7 +123,8 @@ describe("schema 1 atomic chunk delta saves", () => {
     );
     expect(w.captureChanges().chunks).toHaveLength(1);
     spy.mockRestore();
-    await writeSave(d, w.captureChanges().chunks);
+    const revision = await writeSave(d);
+    await writeSave(d, w.captureChanges().chunks, revision);
     expect((await loadSave(d.id)).edits["1,25,1"]).toBe(B.Jade);
   });
   it("rejects all legacy formats and generator versions without migration", () => {

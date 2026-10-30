@@ -6,8 +6,8 @@ import { Inventory } from "../src/game/inventory";
 import { Entities } from "../src/game/entities";
 import { Simulation } from "../src/game/simulation";
 import { B } from "../src/world/blocks";
-function fixture(id:number,tool=130) {
-  const world=new World("mining",{},false);world.chunks.set("0,0",{cx:0,cz:0,blocks:new BlockColumn(),revision:0});world.set(2,-20,2,id);
+function fixture(id:number,tool=130,generator=3) {
+  const world=new World("mining",{},false,generator);world.chunks.set("0,0",{cx:0,cz:0,blocks:new BlockColumn(),revision:0});world.set(2,-20,2,id);
   const g=Object.create(Game.prototype) as Game;
   Object.assign(g,{world,inventory:new Inventory(),mode:"survival",hit:{x:2,y:-20,z:2,value:id,normal:{x:0,y:0,z:1},distance:2},input:{left:true},mineProgress:0,mineKey:"",xp:0,containers:{},simulation:new Simulation(world),entities:new Entities(world,{entities:[],drops:[]}),effects:{burst:()=>{}},audio:{play:()=>{}},ui:{toast:()=>{}},achievements:new Set()});
   g.inventory.add(tool);return g;
@@ -26,4 +26,8 @@ it("keeps a full station and its block intact if its whole drop transaction cann
   const g=fixture(B.Chest);g.containers["2,-20,2"]=Array(27).fill(null);g.containers["2,-20,2"][0]={id:130,count:1,durability:70,enchants:{efficiency:1}};
   for(let i=0;i<256;i++)g.entities.drop({id:3,count:64},{x:i*3,y:2,z:5});const before=structuredClone(g.containers);
   mine(g);expect(g.world.get(2,-20,2)).toBe(B.Chest);expect(g.containers).toEqual(before);expect(g.inventory.held!.durability).toBe(240);
+});
+
+it.each([6,7])("keeps the v%i Game mining path valid without populating an explicitly empty entity component",version=>{
+  const g=fixture(B.Stone,130,version);const ticks=mine(g);expect(ticks).toBeGreaterThan(0);expect(ticks).toBeLessThan(500);expect(g.world.generatorVersion).toBe(version);expect(g.world.get(2,-20,2)).toBe(0);expect(g.entities.drops[0].stack.id).toBe(B.Stone);expect(g.entities.life).toBeUndefined();g.entities.dispose();g.world.dispose();
 });

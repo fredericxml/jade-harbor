@@ -48,7 +48,7 @@ export class Effects {
         color: new THREE.Color(color),
       });
   }
-  update(dt: number, p: Vec3, raining: boolean, t: number) {
+  update(dt: number, p: Vec3, raining: boolean | number, t: number) {
     this.particles = this.particles.filter((q) => q.age < 0.7);
     this.particles.forEach((q, i) => {
       q.age += dt;
@@ -63,8 +63,10 @@ export class Effects {
     this.mesh.count = this.particles.length;
     this.mesh.instanceMatrix.needsUpdate = true;
     if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
-    this.rain.visible = raining;
-    if (raining) {
+    const wet=typeof raining==="number"?Math.max(0,Math.min(1,raining)):raining?1:0;
+    this.rain.visible = wet>.015;
+    (this.rain.material as THREE.PointsMaterial).opacity=.6*wet;
+    if (this.rain.visible) {
       for (let i = 0; i < 300; i++) {
         this.rainData[i * 3] = p.x + ((i * 13.371) % 26) - 13;
         this.rainData[i * 3 + 1] =

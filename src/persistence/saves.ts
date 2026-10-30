@@ -6,7 +6,7 @@ import { ARMOR_SLOTS } from "../game/equipment";
 import { Vec3, MIN_Y, MAX_Y, MIN_SECTION, MAX_SECTION, sectionKey, chunkCoord, localCoord, index } from "../core/coords";
 import { B, block } from "../world/blocks";
 import { item } from "../game/items";
-import { GENERATOR_VERSION } from "../world/generator";
+import { GENERATOR_VERSION, isGeneratorVersion } from "../world/generator";
 import { CITY_SPAWN } from "../world/city/plan";
 export const DATABASE_NAME = "jade-harbor-engine-v1";
 export const DATABASE_VERSION = 1;
@@ -56,7 +56,7 @@ export type SaveData = {
 export type SaveSummary = Pick<
   SaveData,
   "id" | "name" | "seed" | "mode" | "created" | "updated"
->;
+> & { generator?: number };
 export type ChunkDelta = { key: string; entries: Uint16Array };
 type StoredWorld = Omit<SaveData, "edits" | "player" | "simulation" | "time" | "weather" | "achievements"> & { revision: number };
 type StoredChunk = ChunkDelta & { worldId: string; revision: number; version: 1 };
@@ -65,7 +65,7 @@ const STORES = ["worlds", "chunks", ...COMPONENTS, "checkpoints"];
 type Checkpoint = { worldId: string; revision: number; schema: 1; committedAt: number; chunks: Record<string, number>; metadata: number };
 const TOP_LEVEL_KEYS = new Set(["format","version","generator","revision","id","name","seed","mode","created","updated","time","weather","edits","player","simulation","achievements"]);
 const PLAYER_KEYS = new Set(["position","yaw","pitch","health","hunger","xp","effects","saturation","exhaustion","breath","slots","selected","armor","cursor","grid","spawn","dead","flying"]);
-const SIMULATION_KEYS = new Set(["containers","furnaces","brewers","hoppers","entities","drops","elapsed","tickNo","cropTimer","pendingTicks","weather","weatherTimer","hardcoreEnded"]);
+const SIMULATION_KEYS = new Set(["containers","furnaces","brewers","hoppers","entities","drops","elapsed","tickNo","cropTimer","pendingTicks","weather","weatherTimer","hardcoreEnded","cityLifeVersion"]);
 const ENTITY_KEYS = new Set(["id","kind","name","body","health","home","goal","timer","cooldown","yaw","state","trades","profession","workplace","navStatus","knockback"]);
 const BODY_KEYS = new Set(["position","velocity","grounded","flying","fallStart"]);
 const DROP_KEYS = new Set(["id","stack","position","velocity","age"]);
@@ -271,6 +271,7 @@ export async function listSaves(): Promise<SaveSummary[]> {
       id: d.id,
       name: d.name,
       seed: d.seed,
+      generator: d.generator,
       mode: d.mode,
       created: d.created,
       updated: d.updated,
@@ -350,6 +351,8 @@ async function commitSave(data: SaveData, changes?: ChunkDelta[], expectedRevisi
       if (previous && !cpRequest.result && !allowRecovery) throw new Error("Missing save checkpoint. Export your work and create a new world.");
       if (previous && (!Number.isSafeInteger(previous.revision) || previous.revision < 0 || previous.revision >= Number.MAX_SAFE_INTEGER))
         throw new Error("Invalid save revision. Reset this world or import a known-good backup.");
+      if (previous && (previous.generator !== data.generator || previous.seed !== data.seed))
+        throw new Error("World seed and generator are immutable. Import as a separate world.");
       revision = (previous?.revision ?? 0)+1;
       const state = splitState(data,revision);
       let manifest: Record<string,number> = {};
@@ -386,7 +389,7 @@ async function recoveryWorldMeta(id: string) {
   const d=request.result as StoredWorld | undefined;
   if (!d) throw new Error("This world is no longer available.");
   if (!plainRecord(d) || !onlyKeys(d as unknown as Record<string, unknown>,STORED_WORLD_KEYS) ||
-      d.id !== id || d.format !== "jade-harbor-engine" || d.version !== 1 || d.generator !== GENERATOR_VERSION ||
+      d.id !== id || d.format !== "jade-harbor-engine" || d.version !== 1 || !isGeneratorVersion(d.generator) ||
       typeof d.name !== "string" || typeof d.seed !== "string" ||
       !["creative","survival","hardcore","adventure","spectator"].includes(d.mode) ||
       !timestamp(d.created) || !timestamp(d.updated) ||
@@ -415,6 +418,7 @@ export async function resetSave(id: string) {
   // stored metadata, then atomically replace every save component.
   const old = await recoveryWorldMeta(id),
     fresh = freshWorld(old.name, old.seed, old.mode, id);
+  fresh.generator = old.generator;
   fresh.revision = await commitSave(fresh, undefined, old.revision, true);
   return fresh;
 }
@@ -427,7 +431,7 @@ export function validateSave(raw: unknown): SaveData {
     !onlyKeys(d as unknown as Record<string, unknown>, TOP_LEVEL_KEYS) ||
     d.version !== 1 ||
     d.format !== "jade-harbor-engine" ||
-    d.generator !== GENERATOR_VERSION ||
+    !isGeneratorVersion(d.generator) ||
     typeof d.id !== "string" ||
     !d.id ||
     d.id.length > 160 ||
@@ -515,10 +519,21 @@ export function validateSave(raw: unknown): SaveData {
     )
       throw new Error("Invalid world block.");
   }
-  validateSimulation(d.simulation);
+  validateSimulation(d.simulation, d.generator);
   d.name = d.name.slice(0, 64);
   d.seed = d.seed.slice(0, 100);
   return d;
+}
+/** Explicit layout upgrade in a new save slot. Existing v6 data is never
+ * rewritten with a different generator; overlays and progress survive. */
+export function denseCityCopy(source: SaveData, target: 7 | 8 | 9 | 10 = 8): SaveData {
+  const copy = validateSave(source);
+  if (copy.generator !== 6 && !(target === 8 && copy.generator === 7) && !(target === 9 && (copy.generator === 7 || copy.generator === 8)) && !(target === 10 && copy.generator >= 7 && copy.generator <= 9)) throw new Error("This city layout already uses its own saved generation rules.");
+  copy.id = crypto.randomUUID(); copy.generator = target; copy.revision = 0;
+  copy.name = `${copy.name.slice(0, 50)} (dense city)`;
+  copy.created = copy.updated = Date.now();
+  copy.player.position = { ...CITY_SPAWN }; copy.player.spawn = { ...CITY_SPAWN }; copy.player.flying = false;
+  return validateSave(copy);
 }
 export function exportSave(d: SaveData) {
   const blob = new Blob([JSON.stringify(d)], { type: "application/json" }),
@@ -530,7 +545,7 @@ export function exportSave(d: SaveData) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-function validateSimulation(sim: Record<string, unknown> | undefined) {
+function validateSimulation(sim: Record<string, unknown> | undefined, generator: number) {
   if (sim === undefined) return;
   const fail = () => {
     throw new Error("Invalid world simulation data.");
@@ -636,11 +651,12 @@ function validateSimulation(sim: Record<string, unknown> | undefined) {
       if(!positionKey(key)||!plainRecord(h)||!onlyKeys(h as unknown as Record<string, unknown>,HOPPER_KEYS)||!slots(h.slots,5)||!finite(h.cooldown)||h.cooldown<0||h.cooldown>.4)fail();
     }
   }
+  if (sim.cityLifeVersion !== undefined && sim.cityLifeVersion !== 1 && !(sim.cityLifeVersion === 2 && generator >= 7) && !(sim.cityLifeVersion === 3 && generator >= 8) && !(sim.cityLifeVersion === 4 && generator >= 9) && !(sim.cityLifeVersion === 5 && generator === 10)) fail();
   if (sim.elapsed !== undefined && (!finite(sim.elapsed) || Number(sim.elapsed) < 0 || Number(sim.elapsed) > 1e12)) fail();
   if (sim.tickNo !== undefined && (!Number.isSafeInteger(sim.tickNo) || Number(sim.tickNo) < 0 || Number(sim.tickNo) > 1e12)) fail();
   if (sim.cropTimer !== undefined && (!finite(sim.cropTimer) || Number(sim.cropTimer) < 0 || Number(sim.cropTimer) > 12)) fail();
   if (sim.entities !== undefined) {
-    if (!Array.isArray(sim.entities) || sim.entities.length > 256) fail();
+    if (!Array.isArray(sim.entities) || sim.entities.length > (generator >= 8 ? 4096 : generator === 7 ? 1024 : 256)) fail();
     const ids = new Set<string>();
     for (const value of sim.entities as unknown[]) {
       const e = value as import("../game/entities").Entity;
