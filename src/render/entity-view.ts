@@ -5,6 +5,7 @@ import { item } from "../game/items";
 import type { TaskChain } from "../game/city-life/purpose";
 import type { ResidentState } from "../game/city-life/runtime";
 import { identityHash } from "../game/city-life/schedules";
+import { GRAPHICS_PROFILES, type GraphicsProfile } from "./graphics";
 type Part=(color:string,x:number,y:number,z:number,w:number,h:number,d:number,rx?:number,ry?:number)=>void;
 export class EntityView {
   models = new Map<string, THREE.Group>();
@@ -19,6 +20,15 @@ export class EntityView {
   private partMatrix = new THREE.Matrix4();
   private colors = new Map<string, THREE.Color>();
   private actorScale=new THREE.Vector3();
+  readonly stats={simulated:0,full:0,mid:0,far:0,culled:0,parts:0};
+  private readonly visibleResidents:Entity[]=[];
+  private readonly visibleOthers:Entity[]=[];
+  private readonly alive=new Set<string>();
+  private readonly dropIds=new Set<string>();
+  private readonly frustum=new THREE.Frustum();
+  private readonly cameraMatrix=new THREE.Matrix4();
+  private readonly actorSphere=new THREE.Sphere(new THREE.Vector3(),2.2);
+  private readonly phases=new Map<string,number>();
   constructor(public scene: THREE.Scene) {
     this.civilians.count = 0; this.civilians.frustumCulled = false;
     this.civilians.instanceMatrix.setUsage(THREE.DynamicDrawUsage); scene.add(this.civilians);
@@ -103,8 +113,9 @@ export class EntityView {
     this.models.set(e.id, g);
     return g;
   }
-  private purposefulPerson(e:Entity,t:number,task:TaskChain,state:ResidentState|undefined,part:Part) {
-    const look=task.look,h=identityHash(e.id),phase=h%29,walking=Math.hypot(e.body.velocity.x,e.body.velocity.z)>.2;
+  private purposefulPerson(e:Entity,t:number,task:TaskChain,state:ResidentState|undefined,part:Part,detail=0) {
+    let h=this.phases.get(e.id);if(h===undefined){h=identityHash(e.id);this.phases.set(e.id,h);}
+    const look=task.look,phase=h%29,walking=Math.hypot(e.body.velocity.x,e.body.velocity.z)>.2;
     const action=!walking&&state?.taskActing?state.taskAction:undefined,swing=walking?Math.sin(t*7+phase)*.38:0;
     const holding=task.prop==="crate"||task.prop==="book"||task.prop==="tea";
     let left=holding?-.8:swing,right=holding?-.8:-swing;
@@ -117,18 +128,18 @@ export class EntityView {
     else if(action==="serve"||action==="arrange"||action==="shape"||action==="restock"){left=-.65+Math.sin(t*3+phase)*.2;right=-.8-Math.sin(t*3+phase)*.2;}
     this.actorScale.set(look.width,look.height,look.width);this.bodyMatrix.scale(this.actorScale);
     part(look.upper,0,.86,0,.55,.68,.32);
-    if(look.apron)part(look.sash,0,.78,.174,.37,.46,.035);
+    if(look.apron&&detail<2)part(look.sash,0,.78,.174,.37,.46,.035);
     part(look.skin,0,1.43,0,.46,.46,.44,action==="inspect"||action==="read"?.1:0,action==="watch"?Math.sin(t*.8+phase)*.25:0);
-    part(look.hair,0,1.66,-.025,.48,.09,.44);
+    if(detail<2)part(look.hair,0,1.66,-.025,.48,.09,.44);
     if(look.hat==="cap")part(look.hatColor,0,1.73,0,.54,.15,.5);
     else if(look.hat==="wrap"){part(look.hatColor,0,1.68,0,.51,.14,.48);part(look.sash,.2,1.59,-.21,.09,.24,.09);}
     else if(look.hat==="straw"){part("#b7a16e",0,1.72,0,.76,.08,.69);part("#aa8b58",0,1.8,0,.39,.14,.36);}
     else if(look.hat==="topknot")part(look.hair,0,1.78,-.05,.19,.19,.2);
-    for(const x of[-.12,.12])part("#2b3e35",x,1.46,.225,.045,.05,.025);
-    part(look.sash,0,.64,.17,.56,.07,.035);
+    if(detail===0)for(const x of[-.12,.12])part("#2b3e35",x,1.46,.225,.045,.05,.025);
+    if(detail<2)part(look.sash,0,.64,.17,.56,.07,.035);
     part(look.upper,-.36,.85,0,.16,.6,.2,left);part(look.upper,.36,.85,0,.16,.6,.2,right);
     part(look.lower,-.16,.28,0,.2,.56,.23,-swing);part(look.lower,.16,.28,0,.2,.56,.23,swing);
-    part(look.hair,-.16,.07,.04,.22,.14,.29);part(look.hair,.16,.07,.04,.22,.14,.29);
+    if(detail===0){part(look.hair,-.16,.07,.04,.22,.14,.29);part(look.hair,.16,.07,.04,.22,.14,.29);}
     if(task.prop==="crate"&&(walking||action==="carry"||action==="unload"||action==="restock")){part("#92704b",0,.86,.39,.46,.39,.37);part("#c7a472",0,.86,.59,.46,.055,.025);}
     if(task.prop==="book"){part("#465e58",0,1.01,.35,.4,.27,.065,-.25);part("#ded3ad",0,1.03,.39,.34,.2,.02,-.25);}
     if(task.prop==="basket"){part("#9d8050",-.43,.59,.12,.28,.27,.28);part("#c3a66a",-.43,.78,.12,.22,.1,.04);}
@@ -137,7 +148,7 @@ export class EntityView {
     if(task.prop==="broom"){part("#a08a58",.37,.72,.22,.045,1.25,.045,action==="sweep"?-.3+Math.sin(t*3+phase)*.15:-.15);part("#ae9863",.37,.13,.29,.25,.2,.11);}
     if(task.prop==="staff"){part("#846d4d",.4,.9,.16,.05,1.8,.05);part("#b7c5b8",.4,1.88,.16,.1,.22,.055);}
   }
-  private civilianBatch(actors: Entity[], t: number,entities:Entities) {
+  private civilianBatch(actors: Entity[], t: number,entities:Entities,camera:THREE.Camera|undefined,profile:GraphicsProfile) {
     let index = 0;
     const part = (color: string, x: number, y: number, z: number, w: number, h: number, d: number, rx = 0, ry = 0) => {
       if (index >= this.civilians.instanceMatrix.count) return;
@@ -147,6 +158,10 @@ export class EntityView {
       this.civilians.setColorAt(index++, c);
     };
     for (const e of actors) {
+      const dx=e.body.position.x-(camera?.position.x??e.body.position.x),dy=e.body.position.y-(camera?.position.y??e.body.position.y),dz=e.body.position.z-(camera?.position.z??e.body.position.z),distance=dx*dx+dy*dy+dz*dz;
+      const detail=distance>profile.residentMidDistance**2?2:distance>profile.residentFullDistance**2?1:0;
+      if(detail===0)this.stats.full++;else if(detail===1)this.stats.mid++;else this.stats.far++;
+      const animationTime=detail>0?Math.floor(t*profile.farAnimationHz)/profile.farAnimationHz:t;
       const p = e.body.position, robe = e.profession ? PROFESSIONS[e.profession].color : "#9b905b";
       const walking = Math.hypot(e.body.velocity.x, e.body.velocity.z) > .2, swing = walking ? Math.sin(t * 7) * .35 : 0;
       const working = !walking && ["working", "browsing", "gathering", "guarding", "sightseeing"].includes(e.state);
@@ -154,12 +169,12 @@ export class EntityView {
       const workArm = working && ["potter", "carpenter", "blacksmith", "merchant", "chef"].includes(e.profession ?? "") ? -.3 + Math.sin(t * 2.2 + p.x) * .18 : 0;
       this.bodyMatrix.makeRotationY(e.yaw); this.bodyMatrix.setPosition(p.x, p.y, p.z);
       const task=entities.life?.plan?.byId.get(e.id)?.task;
-      if(task){this.purposefulPerson(e,t,task,entities.life?.states.get(e.id),part);continue;}
+      if(task){this.purposefulPerson(e,animationTime,task,entities.life?.states.get(e.id),part,detail);continue;}
       part(robe, 0, .86, 0, .55, .68, .32);
       part("#c8aa7e", 0, 1.43, 0, .46, .46, .44, 0, working ? Math.sin(t * .7 + p.z) * .09 : 0);
       part("#3e4539", 0, 1.68, 0, .51, .12, .49);
-      for (const x of [-.12, .12]) part("#2b3e35", x, 1.46, .225, .045, .05, .025);
-      part("#ceae6b", 0, .64, .17, .56, .06, .03);
+      if(detail===0)for (const x of [-.12, .12]) part("#2b3e35", x, 1.46, .225, .045, .05, .025);
+      if(detail<2)part("#ceae6b", 0, .64, .17, .56, .06, .03);
       part(robe, -.36, .85, 0, .16, .6, .2, carrying || book ? -.8 : swing + workArm);
       part(robe, .36, .85, 0, .16, .6, .2, carrying || book ? -.8 : -swing + workArm);
       part("#475549", -.16, .28, 0, .2, .56, .23, -swing);
@@ -170,16 +185,25 @@ export class EntityView {
       if (e.profession === "guard") { part("#846d4d", .4, .9, .16, .05, 1.8, .05); part("#b7c5b8", .4, 1.88, .16, .1, .22, .055); }
       if (working && ["carpenter", "blacksmith"].includes(e.profession ?? "")) part("#73827c", .35, .93 + Math.sin(t * 2.2) * .08, .25, .19, .12, .12);
     }
+    this.stats.parts=index;
     this.civilians.count = index; this.civilians.visible = index > 0;
-    this.civilians.instanceMatrix.needsUpdate = true;
-    if (this.civilians.instanceColor) this.civilians.instanceColor.needsUpdate = true;
+    if(index){this.civilians.instanceMatrix.clearUpdateRanges();this.civilians.instanceMatrix.addUpdateRange(0,index*16);this.civilians.instanceMatrix.needsUpdate=true;
+    if(this.civilians.instanceColor){this.civilians.instanceColor.clearUpdateRanges();this.civilians.instanceColor.addUpdateRange(0,index*3);this.civilians.instanceColor.needsUpdate=true;}}
   }
-  update(entities: Entities, t: number) {
-    const visible = entities.list.filter(e => entities.world.loaded(e.body.position.x,e.body.position.z) &&
-      (e.kind !== "villager" || !entities.life || entities.life.active.has(e.id)));
-    this.civilianBatch(visible.filter(e => e.kind === "villager"), t,entities);
-    const others = visible.filter(e => e.kind !== "villager");
-    const alive = new Set(others.map((e) => e.id));
+  update(entities: Entities, t: number,camera?:THREE.Camera,profile:GraphicsProfile=GRAPHICS_PROFILES.high) {
+    const residents=this.visibleResidents,others=this.visibleOthers,alive=this.alive;residents.length=0;others.length=0;alive.clear();
+    this.stats.simulated=entities.life?.active.size??0;this.stats.full=this.stats.mid=this.stats.far=this.stats.culled=0;
+    if(camera){camera.updateMatrixWorld();this.cameraMatrix.multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse);this.frustum.setFromProjectionMatrix(this.cameraMatrix);}
+    for(const e of entities.list){
+      // Check the bounded active set before loaded-column key work. Rendering
+      // never writes that set, a resident or any task/navigation state.
+      if(e.kind==="villager"&&entities.life&&!entities.life.active.has(e.id))continue;
+      const p=e.body.position;
+      if(!entities.world.loaded(p.x,p.z)){if(e.kind==="villager")this.stats.culled++;continue;}
+      if(camera){this.actorSphere.center.set(p.x,p.y+1.1,p.z);if(this.actorSphere.center.distanceToSquared(camera.position)>16&&!this.frustum.intersectsSphere(this.actorSphere)){if(e.kind==="villager")this.stats.culled++;continue;}}
+      if(e.kind==="villager")residents.push(e);else{others.push(e);alive.add(e.id);}
+    }
+    this.civilianBatch(residents,t,entities,camera,profile);
     for (const [id, g] of this.models)
       if (!alive.has(id)) {
         this.scene.remove(g);
@@ -196,7 +220,7 @@ export class EntityView {
               ? Math.sin(t * 7) * 0.35 * o.userData.limb
               : 0;
     }
-    const dropIds = new Set(entities.drops.map((d) => d.id));
+    const dropIds=this.dropIds;dropIds.clear();for(const d of entities.drops)dropIds.add(d.id);
     for (const [id, m] of this.drops)
       if (!dropIds.has(id)) {
         this.scene.remove(m);
@@ -226,6 +250,6 @@ export class EntityView {
     for (const g of this.models.values()) this.scene.remove(g);
     for (const m of this.drops.values()) this.scene.remove(m);
     this.models.clear();
-    this.drops.clear();
+    this.drops.clear();this.phases.clear();this.visibleResidents.length=this.visibleOthers.length=0;this.alive.clear();this.dropIds.clear();
   }
 }

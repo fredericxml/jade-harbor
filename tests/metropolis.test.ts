@@ -26,7 +26,7 @@ async function digest(c:BlockColumn){
 function ensure(w:World,x:number,z:number,r=1){for(let dz=-r;dz<=r;dz++)for(let dx=-r;dx<=r;dx++)w.ensure(Math.floor(x/16)+dx,Math.floor(z/16)+dz,true);}
 function local(l:UrbanLot,u:number,v:number){return l.facing===0?{x:l.x1+u,z:l.z1+v}:l.facing===1?{x:l.x2+1-v,z:l.z1+u}:l.facing===2?{x:l.x2+1-u,z:l.z2+1-v}:{x:l.x1+v,z:l.z2+1-u};}
 
-it("freezes all 24 pre-overhaul v4 column hashes and leaves the geographic macro plan intact",async()=>{
+it("freezes all 24 pre-overhaul v4 column hashes and leaves the original geography plan macro plan intact",async()=>{
   for(const f of v4Hashes)expect(await digest(generateChunk(f.cx,f.cz,f.seed,4)),JSON.stringify(f)).toBe(f.sha256);
   const old=createV4Generator(seed);expect(g.plan).toEqual(old.plan);expect(g.landmarks).toEqual(old.landmarks);
 });

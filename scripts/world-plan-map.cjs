@@ -6,7 +6,7 @@ require.extensions['.ts'] = (mod, file) => mod._compile(ts.transpileModule(fs.re
 const { createV4Generator } = require('../src/world/generator-v4.ts');
 const { sampleTerrain } = require('../src/world/geography/terrain.ts');
 const g = createV4Generator('jade-harbor');
-const start = -900, end = 900, step = 8, scale = .48, left = 60, top = 110;
+const start = -900, end = 900, step = 16, scale = .48, left = 60, top = 110;
 const X = x => left + (x - start) * scale, Z = z => top + (z - start) * scale;
 const colors = { 'metropolitan-core': '#c5baa2', 'urban-terrace': '#ab947d', 'urban-lowland': '#bcc6a8',
   'harbor-waterfront': '#a2c6bf', 'river-corridor': '#a2c6bf', 'canal-lowland': '#c4d9b2',
@@ -15,7 +15,7 @@ const colors = { 'metropolitan-core': '#c5baa2', 'urban-terrace': '#ab947d', 'ur
 const svg = ['<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="1050" viewBox="0 0 1280 1050">',
   '<rect width="1280" height="1050" fill="#f4f2eb"/>',
   '<g font-family="Arial, sans-serif" fill="#223b35"><text x="60" y="48" font-size="28" font-weight="700">Jade Harbor / world foundation</text>',
-  '<text x="60" y="78" font-size="15">Generator v4 · seed jade-harbor · semantic field sampled every 8 blocks</text></g>',
+  '<text x="60" y="78" font-size="15">Generator v4 · seed jade-harbor · semantic field sampled every 16 blocks</text></g>',
   `<g shape-rendering="crispEdges">`];
 for (let z = start; z < end; z += step) for (let x = start; x < end; x += step) {
   const t = sampleTerrain(g.plan, x, z), color = t.water ? '#548c9d' : colors[t.region];
@@ -40,6 +40,6 @@ for (const [name,color] of Object.entries(colors)) { y += 32; svg.push(`<rect x=
 svg.push('<text x="955" y="700" font-size="14" font-weight="700">Red: future landmark footprints</text><text x="955" y="726" font-size="13">White dashed: connection plans</text><text x="955" y="752" font-size="13">Blue: realized water</text><text x="955" y="792" font-size="13">Reserved sites contain terrain only.</text><text x="955" y="815" font-size="13">No finished monuments are implied.</text>');
 svg.push(`<text x="60" y="1004" font-size="14">X: −900 → +900 · Z: −900 (top) → +900 (bottom) · map extent 1,800 × 1,800 blocks</text>`);
 svg.push('<text x="60" y="1031" font-size="13">Reproduce: node scripts/world-plan-map.cjs · Actual browser screenshots are indexed separately.</text></g></svg>');
-fs.mkdirSync('docs/proof/world-foundation', {recursive:true});
-fs.writeFileSync('docs/proof/world-foundation/world-plan.svg', svg.join('\n'));
-console.log('Wrote docs/proof/world-foundation/world-plan.svg');
+fs.mkdirSync('docs/assets', {recursive:true});
+fs.writeFileSync('docs/assets/geographic-plan.svg', svg.join('\n'));
+console.log('Wrote docs/assets/geographic-plan.svg');

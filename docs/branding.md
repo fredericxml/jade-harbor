@@ -1,4 +1,4 @@
-# Jade Harbor product identity — v2.0.0
+# Jade Harbor product identity — v2.0.1
 
 - **Product:** Jade Harbor
 - **Tagline:** Build Beyond Boundaries.

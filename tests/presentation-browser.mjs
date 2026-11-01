@@ -4,7 +4,7 @@ import {spawn} from 'node:child_process';
 import {mkdir,writeFile,readFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import assert from 'node:assert/strict';
-const output=process.env.PRESENTATION_OUTPUT??'test-results/presentation',records=[],errors=[];
+const output=process.env.PRESENTATION_OUTPUT??'test-results/city-presentation',records=[],errors=[];
 const source=createHash('sha256').update(JSON.stringify(JSON.parse(await readFile('dist/release-integrity.json','utf8')).source)).digest('hex');
 const server=spawn(process.execPath,['node_modules/vite/bin/vite.js','--host','127.0.0.1','--port','4189','--strictPort'],{stdio:['ignore','pipe','pipe']});let browser,page;
 const fixtures=[
@@ -20,7 +20,7 @@ const fixtures=[
 try{
  await mkdir(output,{recursive:true});await new Promise((ok,no)=>{server.stdout.on('data',d=>{if(d.toString().includes('Local:'))ok();});server.on('error',no);server.on('exit',c=>no(Error('server '+c)));});
  browser=await chromium.launch({headless:true,args:['--no-sandbox','--use-angle=swiftshader','--enable-unsafe-swiftshader','--disable-dev-shm-usage']});page=await browser.newPage({viewport:{width:960,height:600}});page.setDefaultTimeout(180000);page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')errors.push(m.text());});
- await page.addInitScript(()=>localStorage.setItem('jade-harbor-settings',JSON.stringify({distance:3,simulationDistance:4})));
+ await page.addInitScript(()=>localStorage.setItem('jade-harbor-settings',JSON.stringify({graphicsQuality:'high',distance:3,simulationDistance:4})));
  await page.goto('http://127.0.0.1:4189');await page.locator('[data-action="new"]').click();await page.locator('[data-action="create"]').click();await page.waitForFunction(()=>window.__game?.active);
  const selected=process.env.PRESENTATION_VIEWS?.split(",");
  for(const f of fixtures.filter(f=>!selected||selected.includes(f.id))){

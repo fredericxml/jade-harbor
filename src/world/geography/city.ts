@@ -23,7 +23,7 @@ export function planPrimaryCity(p: MacroPlan, landmarks: LandmarkPlan): CityPlan
     }
   return { ...original, structures, byChunk };
 }
-/** Contracts are geography-only: Shot 2 supplies the final architectural palettes and parcel rules. */
+/** Contracts are geography-only: the metropolis plan supplies the architectural palettes and parcel rules. */
 export function districtTerrain(p: MacroPlan, id: string) {
   const contract = p.districts.find(d => d.id === id);
   if (!contract) throw new Error(`Unknown district ${id}`);

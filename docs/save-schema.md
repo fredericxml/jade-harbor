@@ -1,4 +1,4 @@
-# Engine save baseline 1
+# Save schema and generator compatibility
 
 Database `jade-harbor-engine-v1`, IndexedDB version 1, format `jade-harbor-engine`, supported generators 3–10. New worlds use generator 10; existing worlds retain their stored generator. No automatic historical migration. Earlier `jade-harbor-city-v1` data is left untouched. The menu explains the fresh-world boundary.
 
@@ -22,7 +22,7 @@ The checkpoint's component checksum includes all of these fields. Save reconstru
 
 The database bootstrap checks whether stores/indexes already exist before creating them during an upgrade transaction. IndexedDB version remains `1`; this makes future version increments safer without changing the current persistence format.
 
-## Generator identity and first checkpoint
+## Generator identity and checkpoint ownership
 
 The stored generator is dispatched through Game, World and the worker and is preserved by snapshots, exports/imports, duplication and reset/recovery. Only numeric generator versions `3` through `10` are accepted. Ordinary writes cannot change the seed or generator for an existing world ID. Macro, metropolis and landmark realization plans are reconstructed and never added to the persisted schema.
 
@@ -30,7 +30,7 @@ A revision-zero Game save writes a full snapshot, including preloaded/imported e
 
 ### Generator 6 boundary
 
-Generator 6 introduced deterministic landmark terrain as a new world layout instead of changing generator 5 beneath saved edit deltas. The earlier metropolis implementation remains available for reconstruction, guarded by pre-change full-column hashes. New v6 landmarks use the same schema/checkpoint/overlay path; ordinary writes cannot change a saved world's seed or generator. Reset retains the stored generator, and unsupported versions and non-integer/string lookalikes are rejected. No IndexedDB or save-format version increment is needed.
+landmark design changes deterministic landmark terrain, so it introduces v6 instead of changing v5 beneath saved deltas. V5 and its metropolis modules remain byte-identical to the completed district architecture baseline, guarded by 78 pre-change full-column hashes. New v6 landmarks use the same schema/checkpoint/overlay path; ordinary writes cannot change a saved world's seed or generator. Reset retains the stored generator, and unsupported versions and non-integer/string lookalikes are rejected. No IndexedDB or save-format version increment is needed.
 
 
 ## Living-city extension
@@ -53,16 +53,16 @@ V8 owns denser parcel/road geometry, varied building assemblies and the global w
 
 V8 accepts earlier initialized markers 1/2 and writes marker 3. A marker-2 copy extends only with new `inhabitant:` identities, so absent released residents remain absent. Marker 3 prevents subsequent deaths/removals from being regenerated. Explicit empty components stay empty. Only v8 accepts marker 3 and up to 4,096 entity entries; v7 remains 1,024 and earlier versions 256. Existing drop, achievement and other component bounds remain unchanged. Paths, projected volumes, forest masks, street addresses and render instances are reconstructed/transient metadata, not new save stores.
 
-## Generator 9 architectural/regional boundary
+## Generator 9 architectural and regional compatibility
 
 Generator 9 changes roof realization and regional terrain/content, so an existing v8 ID is never rewritten as v9. The current world-list copy action accepts source 6/7/8 and creates a separate v9 slot with the same seed, overlays, inventory, health, achievements and simulation. Player/spawn return to Panda. Existing original copy API targets 7/8 remain available explicitly. Format and database remain 1.
 
-Marker 4 is valid only for v9. Copies accept earlier initialized population markers and add only the appropriate new identities; an initialized v8 component adds the eighty `region9:` identities while preserving removed old residents. Existing resident bodies initialize once at the copied layout's routine anchors, retaining health and trades. Marker 4 reloads preserve saved positions and do not repeat extension. The 4,096 total entity limit remains the v8/v9 component ceiling. Explicit empty components stay empty.
+Marker 4 is valid only for v9. Copies accept earlier initialized population markers and add only the appropriate new identities; an initialized v8 component adds the eighty `region9:` identities while preserving removed old residents. Existing resident bodies initialize once at the copied layout's routine anchors, retaining health and trades. Marker 4 reloads preserve saved positions and do not repeat extension. The4096 total entity limit remains the v8/v9 component ceiling. Explicit empty components stay empty.
 
 Travel unlocks derive from the same `discovery:` achievements. District discoveries supplement the original 16, with five more regional records in v9. No separate travel database or persisted path/active-set state exists. Travel changes position/facing through normal snapshots and preserves edit overlays; a blocked destination cannot authorize deletion of saved edits.
 
-## Generator 10 city-life extension
+## Generator 10 compatibility
 
 Fresh worlds now store generator 10. Generators 3–9 remain accepted and immutable during ordinary writes. The actual world-list **Create updated city copy** action supports sources 6–9 and writes a separate generator 10 slot; explicit older target-7/8/9 APIs remain available. It preserves overlay, inventory, health, discoveries, resident identities and trade state, and resets copied player arrival/spawn to Panda Plaza.
 
-Generator 10 serializes `cityLifeVersion: 5` under the existing simulation component. A copied marker-4 generator-9 component is accepted without extending/resurrecting residents. Reload preserves defeated/removed IDs. Short task states, appearance metadata, paths and render instances are deterministic or disposable runtime data, not new durable databases. The 4,096-entity save bound and 96-active detailed set are unchanged.
+Generator 10 serializes `cityLifeVersion: 5` under the existing simulation component. A copied marker-4 generator 9 component is accepted without extending/resurrecting residents. Reload preserves defeated/removed IDs. Short task phases, appearance metadata, paths and render instances are deterministic or disposable runtime data, not new durable databases. The 4,096-entity save bound and 96-active detailed set are unchanged.

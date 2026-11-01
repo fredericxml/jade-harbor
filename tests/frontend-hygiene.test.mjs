@@ -74,7 +74,7 @@ assert.match(sourceHtml, /<div id="app"><\/div>/);
 
 const pkg = JSON.parse(readFileSync("package.json", "utf8"));
 const lock = JSON.parse(readFileSync("package-lock.json", "utf8"));
-assert.equal(pkg.version, "2.0.0", "final release must retain its explicit release version");
+assert.equal(pkg.version, "2.0.1", "final release must retain its explicit release version");
 assert.equal(lock.version, pkg.version);
 assert.equal(lock.packages[""].version, pkg.version);
 

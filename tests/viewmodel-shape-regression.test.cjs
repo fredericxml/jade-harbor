@@ -25,7 +25,11 @@ const items={
   105:{category:'Food',color:'#e3d9bb'},
   161:{category:'Brewing',color:'#b9e2df'},
 };
-const srcMethod=source.match(/  setHeldItem\(id: number \| null\) \{[\s\S]*?\n  \}\n  resize\(\)/)[0].replace(/\n  resize\(\)$/,'');
+const rendererTree=ts.createSourceFile('renderer.ts',source,ts.ScriptTarget.ES2022,true);
+const viewClass=rendererTree.statements.find(n=>ts.isClassDeclaration(n)&&n.name?.text==='View');
+const heldMethod=viewClass?.members.find(n=>ts.isMethodDeclaration(n)&&n.name.getText(rendererTree)==='setHeldItem');
+assert(heldMethod,'View.setHeldItem must exist');
+const srcMethod=heldMethod.getText(rendererTree);
 const srcJS=ts.transpileModule('class T{'+srcMethod+'}',{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
 const Src=Function('THREE','item',srcJS+';return T')(THREE,i=>items[i]);
 const includes=(a,b)=>a.toLowerCase().includes(b);

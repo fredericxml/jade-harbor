@@ -1,63 +1,48 @@
-# Feature matrix
+# What you can do in Jade Harbor
 
-This document describes the capabilities and boundaries of the `2.0.0` release. **Verified** means that automated, browser, or production evidence exists for the stated scope; it does not imply that every possible seed, device, or user-created world state has been tested.
+Jade Harbor `2.0.1` is a single-player voxel sandbox centered on a dense Chinatown metropolis and the destinations connected to it. This guide summarizes the main player experiences and the boundaries of the current release.
 
-## Current release capabilities
+## Explore a connected city
 
-| Area | Status | Release scope |
-|---|---|---|
-| Chinatown world identity | Verified | Dense procedural city, ten districts, lantern and roof language, editable Panda Plaza, streets, markets, courtyards, canals, and waterfronts |
-| World generation | Verified | Deterministic terrain and city generation, signed coordinates, sparse vertical sections, caves, deep mine, and chunk streaming |
-| Building and mining | Verified | Placement, mining, tool tiers, durability, collision-aware interaction, and chunk-boundary edits |
-| Game modes | Verified | Survival, Adventure, Hardcore, Creative, Spectator, mode-specific permissions, and safe transitions |
-| Inventory and containers | Verified | 36-slot inventory, hotbar, stack limits, drag/split/transfer behavior, and persistent containers |
-| Crafting and processing | Verified | Manual grid, recipe book, kiln/furnace processing, repair, and inscription modifiers |
-| Brewing and effects | Verified | Seven infusion recipes, timed effects, resource validation, and persistence |
-| Survival systems | Verified | Health, hunger, breath, food, farming, tools, armor, death/respawn, and hostile encounters |
-| NPCs and trading | Implemented | Persistent professions, home/work identity, bounded navigation, guards, merchants, and item exchange; no full production economy |
-| Automation | Verified subset | Switches, wire, lamps, doors, timers, pressure plates, hoppers, and kiln pipelines |
-| Fluids | Verified subset | Source water/lava placement and collection, bounded scheduled simulation, and mixing behavior; not full reference-game fluid fidelity |
-| Persistence | Verified | IndexedDB worlds, validated import/export, player/world/container/entity/machine/simulation state, checkpoint integrity, and recovery validation |
-| First-person presentation | Verified | Separate foreground render pass, block/tool held models, and stable tool orientation |
-| Atmosphere | Verified | Cyclic day/night, rain, clouds, fog, water tint, and night vision presentation |
-| Distant scenery | Verified within limits | Bounded render-only terrain and selected skyline anchors; not a seamless unlimited panorama |
-| Travel Journal | Verified | 33 on-foot discoveries grouped into 18 area hubs for generator 9 and 10 worlds |
-| Hardware GPU performance | Not universally verified | CPU work is instrumented; actual frame rate depends on browser, GPU, resolution, and hardware acceleration |
-
-## World and city scope
-
-| Area | Current implementation |
+| Experience | What is included |
 |---|---|
-| World generator | New worlds use generator 10; generators 3–9 remain supported for existing saves |
-| City districts | Ten named districts with distinct street patterns, building families, frontage, public spaces, and local activity |
-| Landmark programs | Eight original reservation-backed destinations with supported public approaches |
-| Regional destinations | Five destinations within the existing world envelope, each with a public circuit and supporting buildings |
-| Architecture | Multiple massings, floor counts, roof grammars, facade systems, frontage relationships, and district-weighted selection |
-| Persistent population | 4,080 resident identities; up to 96 detailed active residents at a time |
-| City activity | Work, commerce, patrol, visits, short actions, and bounded social gatherings using existing residents |
-| Generic woodland | Four-percent potential world-space mask; measured generic-forest coverage remains below five percent in the tested envelope |
-| Discovery and travel | 33 discoveries, 18 area hubs, safe arrival validation, saved unlocks, and explicit old-world compatibility |
+| Chinatown metropolis | Ten districts, connected streets, markets, courtyards, canals, waterfronts, workyards, gardens, and Panda Plaza |
+| Landmarks | Eight original Chinese-inspired destinations with public approaches and walkable spaces |
+| Regional destinations | Five distinct areas beyond the central city, all within the established world |
+| Discoveries | 33 on-foot discoveries grouped into 18 district or regional travel hubs |
+| Living population | 4,080 persistent resident identities, with up to 96 nearby residents receiving detailed local movement at once |
+| Atmosphere | A changing day/night cycle, rain, clouds, fog, water tint, and night vision |
 
-## Historical generator compatibility
+## Build and play your way
 
-| Generator | Retained world behavior |
+| System | What you can do |
 |---|---|
-| 3 | Original terrain and city reconstruction |
-| 4 | Geographic plan and connected surrounding terrain |
-| 5 | Ten-district metropolis, roads, lots, and district architecture |
-| 6 | Eight landmark programs and public approaches |
-| 7 | Additive street-density and resident-address extension |
-| 8 | Dense urban fabric, building assemblies, and cultivated land-use policy |
-| 9 | Regional destinations, reduced woodland policy, and unified travel/discovery |
-| 10 | Current architecture variation, purposeful city activity, and final presentation integration |
+| Game modes | Play Survival, Adventure, Hardcore, Creative, or Spectator |
+| Building and mining | Place and remove blocks, use tools, manage durability, and edit the world |
+| Inventory | Organize items, use a hotbar, split and transfer stacks, and store items in containers |
+| Crafting | Use the crafting grid and recipe book to make equipment, blocks, and useful items |
+| Processing | Smelt resources in kilns, use hoppers, and manage machine inputs and outputs |
+| Progression | Earn XP, create inscriptions, repair equipment, and use timed infusions |
+| Farming and fluids | Grow crops and use source water/lava buckets with bounded fluid behavior |
+| Combat | Fight hostile spirits, use equipment, and collect available drops |
+| Trading | Interact with merchants and other residents who have available offers |
+| Automation | Connect switches, wires, lamps, doors, timers, pressure plates, hoppers, and processing stations |
 
-Worlds retain their stored generator identity. The explicit updated-city copy action creates a separate generator-10 save for supported older worlds; it does not rewrite the original.
+## Adjust the presentation
 
-## Explicitly outside this release
+Low, Medium, and High graphics presets let you choose a balance between image detail and performance. Medium is the default. High preserves the established `2.0.0` presentation; Low and Medium simplify selected render-only details. The presets do not change the world, resident identities, AI schedules, simulation rules, or gameplay systems.
 
-- Multiplayer and networked persistence.
-- Boats, minecarts, and other vehicle systems.
-- Advanced piston/repeater automation and full reference-game circuitry.
-- A full production economy, warehouse simulation, or large-scale NPC economic model.
-- Alternate dimensions, portal progression, and endgame bosses.
-- A seamless unlimited panorama or universal hardware frame-rate guarantee.
+## What this release does not include
+
+| Not included | Current boundary |
+|---|---|
+| Multiplayer | Jade Harbor is single-player. |
+| Vehicles | There is no boat, minecart, or general vehicle system. |
+| Full city economy | Trading and resident activity are bounded gameplay systems, not a city-wide production and supply simulation. |
+| Quest campaign | Discoveries are optional exploration records; there is no mission-driven story campaign. |
+| Full offline simulation | Unloaded machines, crops, and resident routines do not continue as a complete elapsed-time simulation. |
+| Advanced automation | Automation covers the listed switches, wires, timers, pressure plates, hoppers, doors, lamps, and processing connections. It is not a full logic-gate or piston system. |
+| Alternate dimensions and endgame bosses | The release has one continuous world and no alternate-realm campaign. |
+| Universal FPS target | Performance varies by hardware and browser; no universal 40 or 60 FPS guarantee is made. |
+
+For controls and practical examples, see [gameplay controls](gameplay-controls.md). For technical boundaries and compatibility, see [known limitations](known-limitations.md).

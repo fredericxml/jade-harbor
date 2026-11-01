@@ -8,11 +8,12 @@ import { block, B } from "../world/blocks";
 import type { Palette, RoofKind } from "../world/landmarks/types";
 import type { Rect } from "../world/city/plan";
 import type { Atmosphere } from "./atmosphere";
+import { GRAPHICS_PROFILES, type GraphicsProfile } from "./graphics";
 
 const SIZE=128,LAYERS=MAX_SECTION-MIN_SECTION+1,STEP=16;
 export const DISTANT_RADIUS=720;
 export type ProxyBox={id:string;x:number;y:number;z:number;w:number;h:number;d:number;color:string;yaw:number};
-export type DistantPlan={originX:number;originZ:number;width:number;depth:number;boxes:ProxyBox[]};
+export type DistantPlan={originX:number;originZ:number;width:number;depth:number;step:number;boxes:ProxyBox[]};
 /** Coarse surface samples share landmark pad ownership with the terrain mesh. */
 export function distantSurface(world:World,x:number,z:number,elevation?:number):number {
   const macro=world.macroPlan;if(!macro)return SEA+1;
@@ -20,10 +21,10 @@ export function distantSurface(world:World,x:number,z:number,elevation?:number):
   return Math.max(SEA+1,pad&&pad.kind==="plinth"?pad.level+1:ground+1)-.12;
 }
 /** Read-only plan projection. No generator/World/chunk writes, voxel bake or actor state. */
-export function distantPlan(world:World):DistantPlan|undefined {
+export function distantPlan(world:World,profile:GraphicsProfile=GRAPHICS_PROFILES.high):DistantPlan|undefined {
   const macro=world.macroPlan;if(!macro)return;
   const bounds=footprintBounds(macro.envelope),originX=Math.floor((bounds.x1-128)/STEP)*STEP,originZ=Math.floor((bounds.z1-128)/STEP)*STEP;
-  const width=Math.min(SIZE,Math.ceil((bounds.x2+128-originX)/STEP)),depth=Math.min(SIZE,Math.ceil((bounds.z2+128-originZ)/STEP)),boxes:ProxyBox[]=[];
+  const step=profile.distantTerrainStep,width=Math.min(Math.ceil(SIZE*STEP/step),Math.ceil((bounds.x2+128-originX)/step)),depth=Math.min(Math.ceil(SIZE*STEP/step),Math.ceil((bounds.z2+128-originZ)/step)),boxes:ProxyBox[]=[];
   const box=(id:string,x:number,y:number,z:number,w:number,h:number,d:number,color:number,yaw=0)=>{if(w>0&&h>0&&d>0)boxes.push({id,x,y,z,w,h,d,color:block(color).color,yaw});};
   const rectBox=(id:string,r:Rect,low:number,high:number,color:number)=>box(id,(r.x1+r.x2+1)/2,(low+high)/2,(r.z1+r.z2+1)/2,r.x2-r.x1+1,high-low,r.z2-r.z1+1,color);
   const roof=(id:string,r:Rect,y:number,p:Palette,kind:RoofKind)=>{
@@ -34,7 +35,7 @@ export function distantPlan(world:World):DistantPlan|undefined {
   // A linear terrain triangle never falls below its lowest grid vertex.
   // Foundations reach that minimum, including graded pads and water decks.
   const footing=(r:Rect)=>{
-    let y=Infinity;for(let z=Math.floor(r.z1/STEP)*STEP;z<=Math.ceil((r.z2+1)/STEP)*STEP;z+=STEP)for(let x=Math.floor(r.x1/STEP)*STEP;x<=Math.ceil((r.x2+1)/STEP)*STEP;x+=STEP)y=Math.min(y,distantSurface(world,x,z));return y-1;
+    let y=Infinity;for(let z=originZ+Math.floor((r.z1-originZ)/step)*step;z<=originZ+Math.ceil((r.z2+1-originZ)/step)*step;z+=step)for(let x=originX+Math.floor((r.x1-originX)/step)*step;x<=originX+Math.ceil((r.x2+1-originX)/step)*step;x+=step)y=Math.min(y,distantSurface(world,x,z));return y-1;
   };
   const foundation=(id:string,r:Rect,level:number)=>rectBox(id+":foundation",r,Math.min(footing(r),level-1),level+1,B.SculptureStone);
   // Major existing anchors only; ordinary houses remain full-detail geometry.
@@ -73,8 +74,9 @@ export function distantPlan(world:World):DistantPlan|undefined {
   const designs=density&&"designs" in density&&density.designs instanceof Map?density.designs as ReadonlyMap<string,RichDesign>:undefined;
   if(world.generatorVersion===10&&designs&&urban)for(const district of urban.districts){
     const lots=urban.lots.filter(l=>l.districtId===district.id),cx=(district.bounds.x1+district.bounds.x2)/2,cz=(district.bounds.z1+district.bounds.z2)/2;
-    for(let quadrant=0;quadrant<4;quadrant++){
-      const lot=lots.filter(l=>Number((l.x1+l.x2)/2>=cx)+2*Number((l.z1+l.z2)/2>=cz)===quadrant).sort((a,b)=>{const da=designs.get(a.id)!,db=designs.get(b.id)!;return db.floors-da.floors||(b.x2-b.x1)*(b.z2-b.z1)-(a.x2-a.x1)*(a.z2-a.z1)||a.id.localeCompare(b.id);})[0];if(!lot)continue;
+    for(let choice=0;choice<profile.crownBuildingsPerDistrict;choice++){
+      const quadrant=profile.crownBuildingsPerDistrict===1?-1:Math.round(choice*3/(profile.crownBuildingsPerDistrict-1));
+      const lot=lots.filter(l=>quadrant<0||Number((l.x1+l.x2)/2>=cx)+2*Number((l.z1+l.z2)/2>=cz)===quadrant).sort((a,b)=>{const da=designs.get(a.id)!,db=designs.get(b.id)!;return db.floors-da.floors||(b.x2-b.x1)*(b.z2-b.z1)-(a.x2-a.x1)*(a.z2-a.z1)||a.id.localeCompare(b.id);})[0];if(!lot)continue;
       const design=designs.get(lot.id)! as RichDesign,assembly=planRichBuilding(lot,design);
       foundation(`crown:${lot.id}`,lot,lot.baseY);
       const point=(u:number,v:number)=>lot.facing===0?[lot.x1+u,lot.z1+v]:lot.facing===1?[lot.x2-v,lot.z1+u]:lot.facing===2?[lot.x2-u,lot.z2-v]:[lot.x1+v,lot.z2-u];
@@ -84,30 +86,43 @@ export function distantPlan(world:World):DistantPlan|undefined {
     }
   }
   if(boxes.length>1500)throw Error("Distant anchor budget exceeded");
-  return{originX,originZ,width,depth,boxes};
+  return{originX,originZ,width,depth,step,boxes};
 }
 
-function geometry(positions:number[],colors:number[],kinds:number[]) {
-  const g=new THREE.BufferGeometry();g.setAttribute("position",new THREE.Float32BufferAttribute(positions,3));g.setAttribute("color",new THREE.Float32BufferAttribute(colors,3));g.setAttribute("kind",new THREE.Float32BufferAttribute(kinds,1));g.computeVertexNormals();g.computeBoundingSphere();return g;
+/** Typed output is written in bounded batches. Normals use the same flat
+ * triangle cross-product as computeVertexNormals on non-indexed geometry. */
+class DistantBuffer {
+  readonly position:Float32Array;readonly color:Float32Array;readonly normal:Float32Array;readonly kind:Float32Array;
+  private low=[Infinity,Infinity,Infinity];private high=[-Infinity,-Infinity,-Infinity];
+  constructor(readonly count:number){this.position=new Float32Array(count*3);this.color=new Float32Array(count*3);this.normal=new Float32Array(count*3);this.kind=new Float32Array(count);}
+  vertex(i:number,x:number,y:number,z:number,color:THREE.Color,kind:number){
+    const n=i*3,p=this.position;p[n]=x;p[n+1]=y;p[n+2]=z;this.color[n]=color.r;this.color[n+1]=color.g;this.color[n+2]=color.b;this.kind[i]=kind;
+    for(let a=0;a<3;a++){this.low[a]=Math.min(this.low[a],p[n+a]);this.high[a]=Math.max(this.high[a],p[n+a]);}
+  }
+  triangle(first:number){const p=this.position,n=first*3,ax=p[n]-p[n+3],ay=p[n+1]-p[n+4],az=p[n+2]-p[n+5],cx=p[n+6]-p[n+3],cy=p[n+7]-p[n+4],cz=p[n+8]-p[n+5];
+    let x=cy*az-cz*ay,y=cz*ax-cx*az,z=cx*ay-cy*ax;const length=Math.sqrt(x*x+y*y+z*z)||1;x/=length;y/=length;z/=length;
+    for(let v=0;v<3;v++){this.normal[n+v*3]=x;this.normal[n+v*3+1]=y;this.normal[n+v*3+2]=z;}
+  }
+  geometry(){const g=new THREE.BufferGeometry();g.setAttribute("position",new THREE.BufferAttribute(this.position,3));g.setAttribute("color",new THREE.BufferAttribute(this.color,3));g.setAttribute("normal",new THREE.BufferAttribute(this.normal,3));g.setAttribute("kind",new THREE.BufferAttribute(this.kind,1));
+    const min=this.count?new THREE.Vector3(...this.low as [number,number,number]):new THREE.Vector3(),max=this.count?new THREE.Vector3(...this.high as [number,number,number]):new THREE.Vector3();
+    g.boundingBox=new THREE.Box3(min,max);const center=min.clone().add(max).multiplyScalar(.5);g.boundingSphere=new THREE.Sphere(center,min.distanceTo(max)*.5);return g;
+  }
 }
-function proxyGeometry(boxes:readonly ProxyBox[]) {
-  const positions:number[]=[],colors:number[]=[],kinds:number[]=[];
-  for(const b of boxes){const base=new THREE.BoxGeometry(b.w,b.h,b.d),g=base.toNonIndexed();base.dispose();g.rotateY(b.yaw);g.translate(b.x,b.y,b.z);const p=g.getAttribute("position"),c=new THREE.Color(b.color);for(let i=0;i<p.count;i++){positions.push(p.getX(i),p.getY(i),p.getZ(i));colors.push(c.r,c.g,c.b);kinds.push(1);}g.dispose();}
-  return geometry(positions,colors,kinds);
-}
+const cube=(()=>{const indexed=new THREE.BoxGeometry(1,1,1),g=indexed.toNonIndexed(),p=(g.getAttribute("position").array as Float32Array).slice();indexed.dispose();g.dispose();return p;})();
 /** One bounded terrain mesh + one merged anchor mesh and a section coverage texture.
  * Real rendered sections always win. Context restore can recreate all resources
  * from CPU plans; dispose drops both the graph and every owned GPU allocation. */
 export class DistantWorld {
-  readonly group=new THREE.Group(); readonly plan:DistantPlan|undefined;
+  readonly group=new THREE.Group(); plan:DistantPlan|undefined;
   readonly coverage=new Uint8Array(SIZE*SIZE*LAYERS);
   readonly texture=new THREE.DataTexture(this.coverage,SIZE,SIZE*LAYERS,THREE.RedFormat);
   readonly material:THREE.ShaderMaterial;
-  readonly stats={terrainTriangles:0,anchorTriangles:0,anchorBoxes:0,buildMs:0,updates:0,maxBuildSliceMs:0,ready:false};
-  private terrain?:THREE.Mesh; private anchors?:THREE.Mesh; private work?:Generator<void>;
-  private marked=new Set<number>(); private disposed=false; private lastRevision=-1;
-  constructor(private world:World,atmosphere:Atmosphere) {
-    this.plan=distantPlan(world);this.texture.minFilter=this.texture.magFilter=THREE.NearestFilter;this.texture.generateMipmaps=false;this.texture.needsUpdate=true;
+  readonly stats={terrainTriangles:0,anchorTriangles:0,anchorBoxes:0,buildMs:0,updates:0,maxBuildSliceMs:0,ready:false,quality:"high",pendingQuality:"",planMs:0};
+  private terrain?:THREE.Mesh; private anchors?:THREE.Mesh; private work?:Generator<void,void,unknown>;
+  private pending:THREE.BufferGeometry[]=[];private profile:GraphicsProfile;
+  private marked=new Set<number>();private nextMarked=new Set<number>();private coverageColumns=new Set<string>();private coordinates=new Map<string,{cx:number;sy:number;cz:number;column:string}>();private lastNavRevision=-1; private disposed=false; private lastRevision=-1;
+  constructor(private world:World,atmosphere:Atmosphere,profile:GraphicsProfile=GRAPHICS_PROFILES.high) {
+    this.profile=profile;const began=performance.now();this.plan=distantPlan(world,profile);this.stats.planMs=performance.now()-began;this.stats.quality=profile.quality;this.texture.minFilter=this.texture.magFilter=THREE.NearestFilter;this.texture.generateMipmaps=false;this.texture.needsUpdate=true;
     this.material=new THREE.ShaderMaterial({vertexColors:true,side:THREE.DoubleSide,
       uniforms:{coverage:{value:this.texture},origin:{value:new THREE.Vector2(this.plan?.originX??0,this.plan?.originZ??0)},fogColor:{value:atmosphere.fog},lightTint:{value:atmosphere.light},daylight:{value:1},fogNear:{value:50},fogFar:{value:400},fogDetail:{value:100},cameraXZ:{value:new THREE.Vector2()},sunDirection:{value:atmosphere.sunDirection}},
       vertexShader:`attribute float kind;varying vec3 vWorld;varying vec3 vColor;varying vec3 vNormal;varying float vKind;varying float vDepth;
@@ -119,22 +134,40 @@ float shade=.72+.28*max(0.,dot(normalize(vNormal),sunDirection));vec3 c=vColor*l
 #include <colorspace_fragment>
 }`});
     this.group.name="render-only-distant-world";
-    if(this.plan){this.work=this.build();this.stats.anchorBoxes=this.plan.boxes.length;}
+    if(this.plan){this.work=this.build(this.plan);this.stats.anchorBoxes=this.plan.boxes.length;}
   }
-  private *build():Generator<void> {
-    const plan=this.plan!,macro=this.world.macroPlan!,positions:number[]=[],colors:number[]=[],kinds:number[]=[],samples:{y:number;c:THREE.Color}[][]=[];
-    const stone=new THREE.Color("#858e82"),grass=new THREE.Color("#7b916c"),city=new THREE.Color("#a0987e"),water=new THREE.Color("#638c91");
+  setProfile(profile:GraphicsProfile){
+    if(this.disposed||profile===this.profile)return;
+    this.work?.return(undefined);this.work=undefined;for(const g of this.pending)g.dispose();this.pending.length=0;
+    this.profile=profile;const began=performance.now();const old=this.plan;this.plan=distantPlan(this.world,profile);if(old)old.boxes.length=0;
+    this.stats.planMs=performance.now()-began;this.stats.buildMs=0;this.stats.maxBuildSliceMs=0;this.stats.ready=false;this.stats.pendingQuality=profile.quality;
+    if(this.plan){this.work=this.build(this.plan);this.stats.anchorBoxes=this.plan.boxes.length;}
+  }
+  private *build(plan:DistantPlan):Generator<void,void,unknown> {
+    const macro=this.world.macroPlan!,step=plan.step,stride=plan.width+1,heights=new Float64Array(stride*(plan.depth+1)),types=new Uint8Array(heights.length);
+    const palette=[new THREE.Color("#7b916c"),new THREE.Color("#858e82"),new THREE.Color("#a0987e"),new THREE.Color("#638c91")];
     for(let z=0;z<=plan.depth;z++){
-      const row:{y:number;c:THREE.Color}[]=[];
-      for(let x=0;x<=plan.width;x++){
-        const wx=plan.originX+x*STEP,wz=plan.originZ+z*STEP,t=sampleTerrain(macro,wx,wz);
-        row.push({y:distantSurface(this.world,wx,wz,t.elevation)+.12,c:t.water?water:t.urban?city:t.scenic||t.height>85?stone:grass});
-      }samples.push(row);yield;
+      for(let x=0;x<=plan.width;x++){const wx=plan.originX+x*step,wz=plan.originZ+z*step,t=sampleTerrain(macro,wx,wz),i=x+z*stride;heights[i]=distantSurface(this.world,wx,wz,t.elevation);types[i]=t.water?3:t.urban?2:t.scenic||t.height>85?1:0;}yield;
     }
-    const vertex=(x:number,z:number)=>{const s=samples[z][x];positions.push(plan.originX+x*STEP,s.y-.12,plan.originZ+z*STEP);colors.push(s.c.r,s.c.g,s.c.b);kinds.push(0);};
-    for(let z=0;z<plan.depth;z++) {for(let x=0;x<plan.width;x++){vertex(x,z);vertex(x,z+1);vertex(x+1,z);vertex(x+1,z);vertex(x,z+1);vertex(x+1,z+1);}yield;}
-    this.terrain=new THREE.Mesh(geometry(positions,colors,kinds),this.material);this.terrain.name="distant-terrain";this.group.add(this.terrain);this.stats.terrainTriangles=positions.length/9;yield;
-    this.anchors=new THREE.Mesh(proxyGeometry(plan.boxes),this.material);this.anchors.name="distant-anchors";this.group.add(this.anchors);this.stats.anchorTriangles=this.anchors.geometry.getAttribute("position").count/3;this.stats.ready=true;
+    const terrain=new DistantBuffer(plan.width*plan.depth*6);let at=0;
+    const vertex=(x:number,z:number)=>{const i=x+z*stride;terrain.vertex(at++,plan.originX+x*step,heights[i],plan.originZ+z*step,palette[types[i]],0);};
+    for(let z=0;z<plan.depth;z++){
+      for(let x=0;x<plan.width;x++){const start=at;vertex(x,z);vertex(x,z+1);vertex(x+1,z);terrain.triangle(start);vertex(x+1,z);vertex(x,z+1);vertex(x+1,z+1);terrain.triangle(start+3);}yield;
+    }
+    const ground=terrain.geometry();this.pending.push(ground);yield;
+    const anchors=new DistantBuffer(plan.boxes.length*36),colors=new Map<string,THREE.Color>();
+    for(let first=0;first<plan.boxes.length;first+=32){
+      for(let j=first;j<Math.min(first+32,plan.boxes.length);j++){
+        const b=plan.boxes[j],cos=Math.cos(b.yaw),sin=Math.sin(b.yaw);let color=colors.get(b.color);if(!color){color=new THREE.Color(b.color);colors.set(b.color,color);}
+        for(let v=0;v<36;v++){const x=Math.fround(cube[v*3]*b.w),y=Math.fround(cube[v*3+1]*b.h),z=Math.fround(cube[v*3+2]*b.d);anchors.vertex(j*36+v,Math.fround(cos*x+sin*z)+b.x,y+b.y,Math.fround(-sin*x+cos*z)+b.z,color,1);}
+        for(let v=0;v<36;v+=3)anchors.triangle(j*36+v);
+      }yield;
+    }
+    const crown=anchors.geometry();this.pending.push(crown);yield;
+    // Keep the previous presentation until the complete replacement is ready.
+    this.terrain?.geometry.dispose();this.anchors?.geometry.dispose();this.group.clear();
+    this.terrain=new THREE.Mesh(ground,this.material);this.terrain.name="distant-terrain";this.anchors=new THREE.Mesh(crown,this.material);this.anchors.name="distant-anchors";this.group.add(this.terrain,this.anchors);this.pending.length=0;
+    this.stats.terrainTriangles=terrain.count/3;this.stats.anchorTriangles=anchors.count/3;this.stats.quality=this.profile.quality;this.stats.pendingQuality="";this.stats.ready=true;
   }
   /** Reuses the bitmap, updating only entries changed by actual meshing/eviction. */
   update(camera:Vec3,meshed:ReadonlySet<string>,atmosphere:Atmosphere,revision:number) {
@@ -143,21 +176,22 @@ float shade=.72+.28*max(0.,dot(normalize(vNormal),sunDirection));vec3 c=vColor*l
       while(this.work&&slices++<8&&performance.now()-begin<2){if(this.work.next().done)this.work=undefined;}
       const elapsed=performance.now()-begin;this.stats.buildMs+=elapsed;this.stats.maxBuildSliceMs=Math.max(this.stats.maxBuildSliceMs,elapsed);
     }
-    if(revision!==this.lastRevision){
-      this.lastRevision=revision;const marked=new Set<number>(),columns=new Set<string>();let changed=false;
+    if(revision!==this.lastRevision||this.world.navRevision!==this.lastNavRevision){
+      this.lastRevision=revision;this.lastNavRevision=this.world.navRevision;const marked=this.nextMarked,columns=this.coverageColumns;marked.clear();columns.clear();let changed=false;
       const mark=(cx:number,sy:number,cz:number)=>{
         const x=cx-this.plan!.originX/STEP,z=cz-this.plan!.originZ/STEP;if(x<0||z<0||x>=SIZE||z>=SIZE||sy<MIN_SECTION||sy>MAX_SECTION)return;
         const i=x+(z+(sy-MIN_SECTION)*SIZE)*SIZE;marked.add(i);if(!this.coverage[i]){this.coverage[i]=255;changed=true;}
       };
-      for(const key of meshed){const[cx,sy,cz]=key.split(",").map(Number);mark(cx,sy,cz);columns.add(`${cx},${cz}`);}
+      for(const key of meshed){let q=this.coordinates.get(key);if(!q){const[cx,sy,cz]=key.split(",").map(Number);q={cx,sy,cz,column:`${cx},${cz}`};this.coordinates.set(key,q);}mark(q.cx,q.sy,q.cz);columns.add(q.column);}
+      for(const key of this.coordinates.keys())if(!meshed.has(key))this.coordinates.delete(key);
       // A fully known empty section needs no mesh. Once a column has rendered
       // detail, suppress proxies in its authoritative air too: coarse slopes
       // must not fill cliff cutouts or cleared space above shorter buildings.
       for(const key of columns){const c=this.world.chunks.get(key);if(c)for(let sy=MIN_SECTION;sy<=MAX_SECTION;sy++)if(!c.blocks.sections.has(sy))mark(c.cx,sy,c.cz);}
       for(const i of this.marked)if(!marked.has(i)){this.coverage[i]=0;changed=true;}
-      this.marked=marked;if(changed)this.texture.needsUpdate=true;
+      this.nextMarked=this.marked;this.marked=marked;if(changed)this.texture.needsUpdate=true;
     }
     const u=this.material.uniforms;u.cameraXZ.value.set(camera.x,camera.z);u.daylight.value=atmosphere.daylight;u.fogNear.value=atmosphere.fogNear;u.fogFar.value=atmosphere.fogFar;u.fogDetail.value=atmosphere.fogDetail;this.stats.updates++;
   }
-  dispose() {if(this.disposed)return;this.disposed=true;this.work=undefined;this.terrain?.geometry.dispose();this.anchors?.geometry.dispose();this.material.dispose();this.texture.dispose();this.group.clear();this.group.removeFromParent();this.marked.clear();this.coverage.fill(0);this.stats.ready=false;if(this.plan)this.plan.boxes.length=0;}
+  dispose() {if(this.disposed)return;this.disposed=true;this.work?.return(undefined);this.work=undefined;for(const g of this.pending)g.dispose();this.pending.length=0;this.terrain?.geometry.dispose();this.anchors?.geometry.dispose();this.material.dispose();this.texture.dispose();this.group.clear();this.group.removeFromParent();this.marked.clear();this.nextMarked.clear();this.coordinates.clear();this.coverageColumns.clear();this.coverage.fill(0);this.stats.ready=false;if(this.plan)this.plan.boxes.length=0;}
 }

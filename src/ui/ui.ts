@@ -1,3 +1,4 @@
+import {GRAPHICS_QUALITIES,GRAPHICS_PROFILES,graphicsQuality,type GraphicsQuality} from "../render/graphics";
 import { ENCHANTMENTS } from "../game/progression";
 import { ARMOR_SLOTS } from "../game/equipment";
 import { ITEMS, item } from "../game/items";
@@ -343,7 +344,7 @@ export class UI {
         `<div class="world-list">${worldList}</div>`,
         "</section>",
         "</div>",
-        '<footer class="home-footer"><span>JADE HARBOR <i> / </i> MORTAL REALM</span><span>Built block by block.</span><span>JADE HARBOR · v2.0.0</span></footer>',
+        '<footer class="home-footer"><span>JADE HARBOR <i> / </i> MORTAL REALM</span><span>Built block by block.</span><span>JADE HARBOR · v2.0.1</span></footer>',
       ].join(""),
     );
   }
@@ -580,6 +581,7 @@ export class UI {
   }
 
   settings(settings: {
+    graphicsQuality?: GraphicsQuality;
     fov: number;
     sensitivity: number;
     distance: number;
@@ -592,6 +594,8 @@ export class UI {
       "Changes apply immediately.",
       [
         '<div class="settings">',
+        `<label>Graphics quality<select id="graphicsQuality">${GRAPHICS_QUALITIES.map(q=>`<option value="${q}"${q===graphicsQuality(settings.graphicsQuality)?" selected":""}>${GRAPHICS_PROFILES[q].label}</option>`).join("")}</select></label>`,
+        '<p class="form-note">Low favors speed, Medium balances detail, and High preserves full detail. View distance sets scenery range. Simulation distance sets gameplay activity range.</p>',
         `<label>Field of view <output>${settings.fov}°</output><input id="fov" type="range" min="55" max="105" value="${settings.fov}"></label>`,
         `<label>View distance <output>${settings.distance} chunks</output><input id="distance" type="range" min="3" max="8" value="${settings.distance}"></label>`,
         `<label>Simulation distance <output>${settings.simulationDistance} chunks</output><input id="simulationDistance" type="range" min="2" max="6" value="${settings.simulationDistance}"></label>`,

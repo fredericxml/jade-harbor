@@ -10,6 +10,8 @@ export class Effects {
   mesh: THREE.InstancedMesh;
   rain: THREE.Points;
   rainData = new Float32Array(900);
+  rainCount=300;
+  setRainCount(count:number){this.rainCount=Math.max(0,Math.min(300,Math.floor(Number.isFinite(count)?count:300)));this.rain.geometry.setDrawRange(0,this.rainCount);}
   dummy = new THREE.Object3D();
   constructor(public scene: THREE.Scene) {
     this.mesh = new THREE.InstancedMesh(
@@ -49,8 +51,7 @@ export class Effects {
       });
   }
   update(dt: number, p: Vec3, raining: boolean | number, t: number) {
-    this.particles = this.particles.filter((q) => q.age < 0.7);
-    this.particles.forEach((q, i) => {
+    let live=0;for(let read=0;read<this.particles.length;read++){const q=this.particles[read];if(q.age>=.7)continue;const i=live++;this.particles[i]=q;
       q.age += dt;
       q.v.y -= 10 * dt;
       q.p.addScaledVector(q.v, dt);
@@ -59,15 +60,15 @@ export class Effects {
       this.dummy.updateMatrix();
       this.mesh.setMatrixAt(i, this.dummy.matrix);
       this.mesh.setColorAt(i, q.color);
-    });
-    this.mesh.count = this.particles.length;
-    this.mesh.instanceMatrix.needsUpdate = true;
-    if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
+    }
+    this.particles.length=live;
+    this.mesh.count = live;
+    if(live){this.mesh.instanceMatrix.needsUpdate = true;if(this.mesh.instanceColor)this.mesh.instanceColor.needsUpdate=true;}
     const wet=typeof raining==="number"?Math.max(0,Math.min(1,raining)):raining?1:0;
     this.rain.visible = wet>.015;
     (this.rain.material as THREE.PointsMaterial).opacity=.6*wet;
     if (this.rain.visible) {
-      for (let i = 0; i < 300; i++) {
+      for (let i = 0; i < this.rainCount; i++) {
         this.rainData[i * 3] = p.x + ((i * 13.371) % 26) - 13;
         this.rainData[i * 3 + 1] =
           p.y + ((((i * 0.317 - t * 8) % 16) + 16) % 16);

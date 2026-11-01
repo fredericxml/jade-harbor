@@ -29,10 +29,11 @@ definitions[999]={id:999,category:'Tools',tool:'future-lance',color:'#aabbcc'};
 definitions[4]={id:4,category:'Architecture',block:4,color:'#bbccaa'};
 definitions[103]={id:103,category:'Materials',color:'#abcabc'};
 const item=id=>definitions[id];
-const startSource=source.indexOf('  setHeldItem(id: number | null) {');
-const endSource=source.indexOf('  resize() {',startSource);
-assert.ok(startSource>=0&&endSource>startSource);
-const sourceJs=ts.transpileModule('class T {'+source.slice(startSource,endSource)+'}',{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
+const rendererTree=ts.createSourceFile('renderer.ts',source,ts.ScriptTarget.ES2022,true);
+const viewClass=rendererTree.statements.find(n=>ts.isClassDeclaration(n)&&n.name?.text==='View');
+const heldMethod=viewClass?.members.find(n=>ts.isMethodDeclaration(n)&&n.name.getText(rendererTree)==='setHeldItem');
+assert(heldMethod,'View.setHeldItem must exist');
+const sourceJs=ts.transpileModule('class T {'+heldMethod.getText(rendererTree)+'}',{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
 const Src=Function('THREE','item',sourceJs+';return T')(THREE,item);
 
 // Three.js Euler XYZ, applied to the local +Y shaft / weapon blade axis.

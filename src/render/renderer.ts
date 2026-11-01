@@ -5,13 +5,20 @@ import { World } from "../world/world";
 import { meshChunk } from "./mesher";
 import { makeAtlas } from "./atlas";
 import { Metrics } from "../core/metrics";
-import { Vec3 } from "../core/coords";
+import { Vec3,MIN_SECTION,MAX_SECTION } from "../core/coords";
+import {graphicsProfile,effectivePixelRatio,rendererDiagnostics,type GraphicsProfile,type RendererDiagnostics}from "./graphics";
 import { Atmosphere, makeSky } from "./atmosphere";
 import { DistantWorld } from "./distant-world";
 import { sampleTerrain } from "../world/geography/terrain";
 import { item } from "../game/items";
 export class View {
   renderer: THREE.WebGLRenderer;
+  graphicsProfile:GraphicsProfile=graphicsProfile("medium");
+  gpu!:RendererDiagnostics;
+  private drawingSizePending=false;
+  private drawingWidth=-1;private drawingHeight=-1;private drawingRatio=-1;
+  private sectionCoordinates=new Map<string,{cx:number;sy:number;cz:number;column:string}>();
+  private surfaceX=NaN;private surfaceZ=NaN;private surfaceHeight=0;
   scene = new THREE.Scene();
   camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.06, 960);
   groups = new Map<string, THREE.Group>();
@@ -54,8 +61,8 @@ export class View {
       antialias: true,
       powerPreference: "high-performance",
     });
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio, 1.6));
-    this.renderer.setSize(innerWidth, innerHeight);
+    this.gpu=rendererDiagnostics(this.renderer.getContext());
+    this.updateDrawingSize();
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.scene.background = new THREE.Color("#bad5ce");
     this.scene.fog = new THREE.Fog("#bad5ce", 55, 155);
@@ -112,7 +119,7 @@ export class View {
       event.preventDefault(); this.contextLost=true; this.onContext?.(true);
     });
     canvas.addEventListener("webglcontextrestored", () => {
-      this.contextLost=false; this.clear();
+      this.contextLost=false; this.clear();this.gpu=rendererDiagnostics(this.renderer.getContext());this.drawingRatio=-1;this.resize();
       for(const c of this.lighting?.world.chunks.values() ?? []) this.lighting!.world.markDirty(c.cx,c.cz);
       this.onContext?.(false);
     });
@@ -244,25 +251,46 @@ export class View {
       addPart([0.205, 0.215, 0.185], metal, -0.015, 0.15, 0, -0.17);
     }
   }
+  setGraphicsProfile(profile:GraphicsProfile){
+    if(profile!==this.graphicsProfile){this.graphicsProfile=profile;this.distant?.setProfile(profile);}
+    const cloud=this.clouds.children[0] as THREE.InstancedMesh|undefined;if(cloud)cloud.count=profile.cloudCount;
+    // Apply backbuffer changes once at the start of a rendered frame. A
+    // settings event must not resize a busy GL surface after submitting draws.
+    this.drawingSizePending=true;
+  }
+  private updateDrawingSize(){
+    const w=Math.max(1,innerWidth),h=Math.max(1,innerHeight),ratio=effectivePixelRatio(this.graphicsProfile,devicePixelRatio);
+    if(w===this.drawingWidth&&h===this.drawingHeight&&ratio===this.drawingRatio)return;
+    this.drawingWidth=w;this.drawingHeight=h;this.drawingRatio=ratio;
+    this.renderer.setDrawingBufferSize(w,h,ratio);this.canvas.style.width=`${w}px`;this.canvas.style.height=`${h}px`;
+  }
+  graphicsDebug(){
+    const gpu=this.gpu,identity=gpu.restricted?gpu.renderer:gpu.unmaskedRenderer,vendor=gpu.restricted?gpu.vendor:gpu.unmaskedVendor;
+    const short=(text:string,n:number)=>text.replace(/[\r\n]/g," ").slice(0,n);
+    return `Graphics ${this.graphicsProfile.label} · scale ${this.graphicsProfile.renderScale.toFixed(2)} · DPR ${this.renderer.getPixelRatio().toFixed(2)} · ${this.drawingWidth}×${this.drawingHeight} → ${this.canvas.width}×${this.canvas.height}\nGPU ${short(vendor,35)} / ${short(identity,100)} · ${gpu.version.split(" (")[0]}${gpu.restricted?" · identity restricted":""}${gpu.software?"\nSoftware rendering detected — hardware GPU performance may be much higher.":""}`;
+  }
+  private sectionCoordinate(key:string){let q=this.sectionCoordinates.get(key);if(!q){const[cx,sy,cz]=key.split(",").map(Number);if(![cx,sy,cz].every(Number.isFinite)||sy<MIN_SECTION||sy>MAX_SECTION)return; q={cx,sy,cz,column:`${cx},${cz}`};this.sectionCoordinates.set(key,q);}return q;}
   resize() {
     this.camera.aspect = innerWidth / innerHeight;
     this.camera.updateProjectionMatrix();
     this.viewmodelCamera.aspect = innerWidth / innerHeight;
     this.viewmodelCamera.updateProjectionMatrix();
-    this.renderer.setSize(innerWidth, innerHeight);
+    this.drawingSizePending=true;
   }
   rebuild(world: World, budget = 2) {
     const macro=world.macroPlan,eye=this.camera.position;
-    const surface=macro?sampleTerrain(macro,eye.x,eye.z).elevation:eye.y;
+    if(macro&&(eye.x!==this.surfaceX||eye.z!==this.surfaceZ)){this.surfaceX=eye.x;this.surfaceZ=eye.z;this.surfaceHeight=sampleTerrain(macro,eye.x,eye.z).elevation;}
+    const surface=macro?this.surfaceHeight:eye.y;
     const center=Math.floor(eye.y/16),surfaceCenter=eye.y>surface+64?Math.floor(surface/16):center;
     // Retain the nine sections around the player (including sky builds),
     // plus at most five surface sections for elevated outdoor views.
     const inRange=(y:number)=>Math.abs(y-center)<=Math.ceil(this.verticalRadius/16)||(surfaceCenter!==center&&Math.abs(y-surfaceCenter)<=2);
     if(center!==this.lastSectionY||surfaceCenter!==this.lastSurfaceY) {
       this.lastSectionY=center;this.lastSurfaceY=surfaceCenter;
-      for(const key of this.deferred) {const [,y]=key.split(",").map(Number);if(inRange(y)){world.dirty.add(key);this.deferred.delete(key);}}
-      for(const key of this.meshed) {const [,y]=key.split(",").map(Number);if(!inRange(y)){this.removeSection(key);this.deferred.add(key);}}
+      for(const key of this.deferred) {const q=this.sectionCoordinate(key);if(q&&inRange(q.sy)){world.dirty.add(key);this.deferred.delete(key);}}
+      for(const key of this.meshed) {const q=this.sectionCoordinate(key);if(q&&!inRange(q.sy)){this.removeSection(key);this.deferred.add(key);}}
     }
+    if(!world.dirty.size)return;
     let n = 0;
     const started = performance.now();
     // The dirty queue can contain hundreds of vertical sections. Sorting
@@ -274,9 +302,8 @@ export class View {
     const nearest: { key: string; cx: number; sy: number; cz: number; distance: number }[] = [];
     const limit = Math.max(1, Math.floor(budget));
     for (const key of world.dirty) {
-      const [cx, sy, cz] = key.split(",").map(Number);
-      const ck = `${cx},${cz}`;
-      if (!world.chunks.has(ck)) {world.dirty.delete(key);continue;}
+      const q=this.sectionCoordinate(key);if(!q){world.dirty.delete(key);continue;}const{cx,sy,cz,column:ck}=q;
+      if (!world.chunks.has(ck)) {world.dirty.delete(key);this.sectionCoordinates.delete(key);continue;}
       if (!inRange(sy)) {
         world.dirty.delete(key);
         this.deferred.add(key);
@@ -298,7 +325,7 @@ export class View {
       const c = world.chunks.get(ck);
       if (!c) continue;
       const meshStarted = performance.now();
-      this.removeSection(key);
+      this.removeSection(key,false);
       const meshData = meshChunk(world, c, this.lighting, sy);
       if(!this.meshed.has(key)){this.meshed.add(key);this.meshRevision++;}
       if (!meshData.some((data) => data.indices.length > 0)) {
@@ -343,27 +370,27 @@ export class View {
       if (++n >= budget || performance.now() - started > 7) break;
     }
   }
-  removeSection(key:string) {
-    if(this.meshed.delete(key))this.meshRevision++;
+  removeSection(key:string,forget=true) {
+    if(forget&&this.meshed.delete(key))this.meshRevision++;
     const g=this.sections.get(key);
     if(g) {g.traverse(o=>{if(o instanceof THREE.Mesh) o.geometry.dispose();});g.removeFromParent();this.sections.delete(key);}
   }
   remove(key: string) {
     const [cx,cz]=key.split(",").map(Number);
-    for(const sk of this.sections.keys()) {const [x,,z]=sk.split(",").map(Number);if(x===cx && z===cz) this.removeSection(sk);}
-    for(const sk of this.deferred) {const [x,,z]=sk.split(",").map(Number);if(x===cx && z===cz)this.deferred.delete(sk);}
-    for(const sk of this.meshed){const [x,,z]=sk.split(",").map(Number);if(x===cx&&z===cz){this.meshed.delete(sk);this.meshRevision++;}}
+    // The released signed-height range has exactly24 section addresses.
+    // Eviction need not rescan and parse every other loaded section.
+    for(let sy=MIN_SECTION;sy<=MAX_SECTION;sy++){const sk=`${cx},${sy},${cz}`;this.removeSection(sk);this.deferred.delete(sk);this.sectionCoordinates.delete(sk);}
     this.groups.get(key)?.removeFromParent();this.groups.delete(key);
   }
   clear() {
     for (const k of this.groups.keys()) this.remove(k);
-    this.meshed.clear();this.deferred.clear();this.lastSectionY=Infinity;this.lastSurfaceY=Infinity;this.meshRevision++;
+    this.meshed.clear();this.deferred.clear();this.sectionCoordinates.clear();this.surfaceX=this.surfaceZ=NaN;this.lastSectionY=Infinity;this.lastSurfaceY=Infinity;this.meshRevision++;
     this.clearDistant();
   }
   clearDistant() {this.distant?.dispose();this.distant=undefined;this.renderWorld=undefined;}
   attachWorld(world:World,time:number,rain=false) {
     if(this.renderWorld===world)return;
-    this.distant?.dispose();this.distant=world.macroPlan?new DistantWorld(world,this.atmosphere):undefined;if(this.distant)this.scene.add(this.distant.group);this.renderWorld=world;
+    this.distant?.dispose();this.distant=world.macroPlan?new DistantWorld(world,this.atmosphere,this.graphicsProfile):undefined;if(this.distant)this.scene.add(this.distant.group);this.renderWorld=world;
     this.atmosphere.reset(time,rain,this.distance);
   }
   environment(time: number, rain = false, nightVision = false,dt=1/60) {
@@ -396,6 +423,7 @@ export class View {
   }
   render() {
     if (this.contextLost) return;
+    if(this.drawingSizePending){this.drawingSizePending=false;this.updateDrawingSize();}
     this.renderer.clear();
     this.renderer.render(this.scene, this.camera);
     this.worldRenderStats.triangles = this.renderer.info.render.triangles;

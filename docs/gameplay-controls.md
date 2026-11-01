@@ -1,6 +1,6 @@
-# Gameplay controls and working examples
+# Gameplay controls and examples
 
-This is the authoritative player-control reference for Jade Harbor `v2.0.0`.
+This is the authoritative player-control reference for Jade Harbor `v2.0.1`.
 
 ## Controls
 
@@ -69,8 +69,12 @@ Effects of the same type refresh duration and do not stack in strength. Death cl
 
 Residents use profession and district schedules. Right-click a nearby resident to see their name, role and available trades; guards and researchers may have no offers. Existing trade costs and daily limits remain. Public activity varies with the clock, and optional outdoor gatherings reduce in rain.
 
-Reach landmark public spaces and side paths on foot to record discoveries. The beacon and pagoda records are on their upper floors. First arrival shows a brief notification without pausing play. Open Pause → Travel journal to browse 33 discoverable places grouped under 18 area hubs; use Back or Esc to return to Pause. Discoveries are optional and have no required sequence or item grind.
+Reach landmark public spaces and side paths on foot to record discoveries. The beacon and pagoda records are on their upper floors. First arrival shows a brief notification without pausing play. Open Pause → Travel journal for the 33 discoverable places and 18 area hubs; use Back or Esc to return to Pause. Discoveries are optional and have no required sequence or item grind.
 
 ## Explore areas
 
 Pause → Travel journal groups 33 discoverable places under 18 district/region hubs. Expand a hub's discovery count to inspect its POIs. Creative and Spectator can travel immediately; other modes unlock an area from any saved member discovery. Arriving does not complete the area: walk on supported ground to discover individual places. Escape cancels preparation.
+
+## Graphics quality
+
+Open Pause → Settings to choose Low, Medium, or High. Medium is the default. High preserves the established `2.0.0` presentation; Low reduces render resolution and selected distant/atmospheric detail. The presets do not change world generation, resident identities, simulation, or gameplay rules. F3 displays the active preset, effective render resolution, and available WebGL renderer diagnostics.

@@ -1,8 +1,20 @@
-# Travel Journal
+# Travel Journal and fast travel
 
-Pause → Travel journal shows **33 discoverable places under 18 area hubs** in generator 9/10 worlds. There is one Travel button per district or meaningful region. Expand a hub's discovery count to see its places and visited indicators. Creative and Spectator always enable all 18 buttons. Survival, Adventure and Hardcore unlock a hub from any existing member discovery; old progress needs no migration or second database.
+The Travel Journal helps you explore the city without treating every point of interest as a separate trip. In current generator-9 and generator-10 worlds, it contains **33 discoveries grouped into 18 travel hubs**.
 
-| Hub | Discoveries represented |
+There is **one Travel destination per district or meaningful region**. A hub can contain several individual discoveries, but those discoveries belong to the same area and do not create duplicate travel destinations.
+
+## Open the Journal
+
+1. Pause the game with `Esc`.
+2. Open **Travel Journal**.
+3. Browse the district and regional hubs.
+4. Expand a hub to see its discoveries and visited indicators.
+5. Select the hub's Travel action to move to its safe arrival area.
+
+## The 18 travel hubs
+
+| Travel hub | Discoveries and places |
 |---|---|
 | Panda Heritage Core | District, Panda Plaza, Grand Lantern Avenue |
 | Old Market Maze | District, Behind the Market |
@@ -14,31 +26,35 @@ Pause → Travel journal shows **33 discoverable places under 18 area hubs** in 
 | Scholar Gardens | District, Scholar Garden Path |
 | Lantern Commercial Core | District |
 | Northern Terrace Edge | District, Northern Ridge Wall, Middle Ridge Watch |
-| Willow Valley Tulou | Region |
-| Amber Gate Village | Region |
-| Li River Stone Walk | Region |
-| Mist Terrace Tea Village | Region |
-| Lotus Causeway Gardens | Region |
+| Willow Valley Tulou | Regional destination |
+| Amber Gate Village | Regional destination |
+| Li River Stone Walk | Regional destination |
+| Mist Terrace Tea Village | Regional destination |
+| Lotus Causeway Gardens | Regional destination |
 | Terrace Excavations | Excavations, Excavation Viewing Rim |
 | East Cliff Chambers | Chambers |
 | Western Scenic Highlands | Cloudstep Sanctuary, Sanctuary Side Terrace, Reed Moon Garden, Western Lookout Pagoda |
 
-## Ownership and compatibility
+## Unlocking travel
 
-`city-life/travel.ts` owns one typed, cached `journalPlaces` model. Every record has its released discovery ID, position, radius and parent hub. Only the 18 area owners have a travel anchor. `travelDestinations` derives hubs and their qualifying member achievements; `discoveryRegistry` projects the same place records. The UI has no competing display-only list. The original 33 discovery coordinates/radii remain frozen in `tests/fixtures/journal-v9.json`.
+- **Creative and Spectator:** all 18 travel hubs are available.
+- **Survival, Adventure, and Hardcore:** a hub becomes available when you discover any one of its member places on foot.
+- Unlocking a hub does not automatically mark every discovery inside it as visited.
 
-Generator 6–8 worlds have 28 discoveries and 13 hubs because their geometry predates the five regional destinations. Earlier worlds safely show no area travel. Travel does not change stored generator identity. The same durable achievements component remains authoritative.
+Older generator-6 to generator-8 worlds have a smaller Journal with 28 discoveries and 13 hubs because those worlds predate the five regional destinations. Earlier supported worlds may not have area travel.
 
-Travel itself awards no discovery. A committed arrival, or loading a world, suppresses passive discovery until the player walks at least two horizontal blocks on supported ground with movement input. This transient guard is not saved. After that, normal supported on-foot visits record individual places. Flying and Spectator visits do not collect them. Returning to an unlocked district does not complete all its sub-POIs.
+## Discover places on foot
 
-## Stage A: minimum safe arrival
+Traveling to a hub does not complete its discoveries. After arriving, explore the area and walk through supported public spaces, routes, viewpoints, and landmark interiors to record individual places.
 
-The accepted two-stage pipeline is retained. A serial-owned request pauses simulation and saves once before eviction. It prepares only the columns covering a bounded six-block search, adjacent exits and collision radius: at most four columns per authored anchor, independent of render distance. A synchronous request supersedes an older worker ticket. Timer yields between columns permit Cancel and the overall three-second deadline, including a stalled save. The preparation panel retains the old frame without spending time on origin rendering or distant LOD.
+Flying and Spectator movement do not count as on-foot discoveries. Returning to an unlocked hub does not automatically complete its remaining points of interest.
 
-Dry support, complete headroom and two usable exits are required. The resolver tries the primary and an authored local secondary, each with bounded search. It never repairs/deletes edits. Failure preserves the origin and releases the lock. Position, interpolation, velocity, fall state, facing and mode update atomically. A best-effort ground mesh uses the ordinary bounded mesher; arrival does not await lighting, the whole district or every resident.
+## Safe arrival and cancellation
 
-Escape/Cancel invalidates the request serial. A stale completion cannot place the player or roll back a replacement. World switching cancels preparation. Concurrent clicks are rejected while a request is owned. Existing residents reactivate; none are created by travel.
+Travel checks for a dry, supported arrival area with enough headroom and usable exits. It does not carve terrain, remove blocks, or overwrite your edits to make a destination work.
 
-## Stage B: background settling
+If your changes have blocked the authored arrival area, the game may reject the trip safely and leave you where you started. You can cancel preparation with `Esc` while the travel request is being prepared.
 
-After placement, ordinary streaming continues with four requests per frame and eight pending jobs. Lighting, section meshes and local actors settle normally. The distant scene is a reusable render cache and is never built on the travel handler's critical path. Preparation latency and the time to finish background detail remain separate measurements. `Game.travelMetrics` retains at most 120 actual handler observations. Executed timings, normal-mode/reload/mobile coverage and failure cases are recorded in [performance](performance.md) and [testing results](quality-assurance.md).
+After arrival, nearby lighting, meshes, residents, and decorative detail may continue settling in the background. You do not need to wait for every distant visual detail before exploring.
+
+See [landmarks](landmarks.md) and [regional destinations](regional-destinations.md) for what you can find at each stop.

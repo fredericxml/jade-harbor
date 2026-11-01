@@ -59,7 +59,7 @@ function hall(w: VoxelWriter, m: MacroPlan, f: Hall) {
 }
 
 /** Two flights with a shared landing. The center aisle stays clear; upper
- * flights leave air below, avoiding the stacked-stair defect fixed in Shot 2. */
+ * flights leave air below, avoiding the stacked-stair defect addressed by the supported assembly rules. */
 function towerStairs(w: VoxelWriter, x: number, z: number, floor: number, rise: number, first: boolean) {
   const low = 3 - (rise - 1);
   w.fill(x - 3, floor + rise, z + low, x - 2, floor + rise, z + 3, AIR);

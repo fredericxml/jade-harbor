@@ -162,7 +162,7 @@ export class Entities {
     };
     if (Array.isArray(data?.entities)) {
       this.list = [...data.entities as Entity[]];
-      // Extend an actual Shot 3 resident save once. Removed original residents
+      // Extend an actual generator-9 resident save once. Removed original residents
       // stay removed; a current population marker prevents resurrecting deaths.
       const firstExtension = data.cityLifeVersion === undefined && this.list.some(e => population?.some(r => r.legacy && r.id === e.id));
       const densityExtension = world.generatorVersion === 7 && data.cityLifeVersion === 1;

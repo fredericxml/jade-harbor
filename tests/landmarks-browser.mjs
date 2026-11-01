@@ -113,7 +113,7 @@ try {
   }
   assert.deepEqual(errors,[]);
   await writeFile(`${output}/results.json`,JSON.stringify({status:"passed",recordedAt:new Date().toISOString(),checks,views,errors,
-    fixtureNote:"Actual generated v6 terrain; spectator cameras/daylight/view distance are fixtures. No geometry injection. Queue metrics are sampled atomically before screenshots. SwiftShader point samples are not physical-GPU FPS guarantees. Temporary images are intentionally excluded from the curated release archive."},null,2));
+    fixtureNote:"Actual generated v6 terrain; spectator cameras/daylight/view distance are fixtures. No geometry injection. Queue metrics are sampled atomically before screenshots. SwiftShader point samples are not physical-GPU FPS guarantees. Temporary images are intentionally excluded from the landmark design download."},null,2));
   console.log("PASS",checks.join("; "));
 } catch(error){
   if(page&&!page.isClosed())await writeFile(`${output}/failure.json`,JSON.stringify({message:String(error),views,errors,state:await page.evaluate(()=>{const g=window.__game;return {position:g?.body.position,chunks:g?.world.chunks.size,generation:g?.world.pending.size,mesh:g?.world.dirty.size,lighting:g?.lighting.pending};})},null,2));

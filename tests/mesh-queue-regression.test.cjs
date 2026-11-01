@@ -8,19 +8,19 @@ class Mesh{constructor(geometry,material){this.geometry=geometry;this.material=m
 const THREE={Group,BufferGeometry:Geometry,Float32BufferAttribute:Attribute,Mesh};
 const empty=()=>({positions:[],normals:[],uvs:[],colors:[],sky:[],lights:[],indices:[]});
 const renderer=fs.readFileSync('src/render/renderer.ts','utf8');
-const start=renderer.indexOf('  rebuild(world: World, budget = 2) {'),end=renderer.indexOf('  removeSection(key:string)',start);
+const start=renderer.indexOf('  rebuild(world: World, budget = 2) {'),end=renderer.indexOf('  removeSection(',start);
 assert.ok(start>=0&&end>start);
-const sourceJs=ts.transpileModule('class T {\n'+renderer.slice(start,end)+'\n}',{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
+const sourceJs=ts.transpileModule('class T {\n'+renderer.slice(renderer.indexOf('  private sectionCoordinate('),renderer.indexOf('  resize() {'))+renderer.slice(start,end)+'\n}',{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
 let recorded=[];
 const generate=(_world,chunk,_lighting,section)=>{recorded.push(`${chunk.cx},${section},${chunk.cz}`);return [empty(),empty(),empty()];};
-const Source=Function('THREE','meshChunk','performance',sourceJs+';return T')(THREE,generate,performance);
+const Source=Function('THREE','meshChunk','performance','MIN_SECTION','MAX_SECTION',sourceJs+';return T')(THREE,generate,performance,-4,19);
 function setup(){
  const chunks=new Map(),dirty=new Set();
  for(let cx=-2;cx<=2;cx++)for(let cz=-2;cz<=2;cz++){
   chunks.set(`${cx},${cz}`,{cx,cz});for(let sy=-2;sy<=2;sy++)dirty.add(`${cx},${sy},${cz}`);
  }
  dirty.add('99,0,99');dirty.add('0,19,0');
- return {world:{dirty,chunks},view:Object.assign(new (class{})(),{camera:{position:{x:8,y:8,z:8}},lastSectionY:0,verticalRadius:64,deferred:new Set(),sections:new Map(),meshed:new Set(),meshRevision:0,groups:new Map(),scene:{add(){}},materials:[{}, {}, {}],metrics:{add(){}},removeSection(){}})};
+ return {world:{dirty,chunks},view:Object.assign(new (class{})(),{camera:{position:{x:8,y:8,z:8}},lastSectionY:0,verticalRadius:64,deferred:new Set(),sections:new Map(),meshed:new Set(),meshRevision:0,groups:new Map(),sectionCoordinates:new Map(),sectionCoordinate:Source.prototype.sectionCoordinate,scene:{add(){}},materials:[{}, {}, {}],metrics:{add(){}},removeSection(){}})};
 }
 for(const [name,Cl] of [['source',Source]]){
  const {world,view}=setup();recorded=[];Cl.prototype.rebuild.call(view,world,3);

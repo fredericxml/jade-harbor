@@ -11,6 +11,7 @@ import { toolStation, brewerPanel } from "../ui/stations";
 import * as THREE from "three";
 import { World } from "../world/world";
 import { View } from "../render/renderer";
+import {graphicsQuality,graphicsProfile,type GraphicsQuality} from "../render/graphics";
 import { UI, esc, icon, slot } from "../ui/ui";
 import type { Screen } from "../ui/ui";
 import { Input } from "../player/input";
@@ -93,7 +94,7 @@ export class Game {
   saveAgain = false;
   saveActivityVersion = 0;
   achievements = new Set<string>();
-  settings = { fov: 75, sensitivity: 4, distance: 5, simulationDistance: 4, volume: 30 };
+  settings = { graphicsQuality: "medium" as GraphicsQuality, fov: 75, sensitivity: 4, distance: 5, simulationDistance: 4, volume: 30 };
   hit: Hit | null = null;
   mineProgress = 0;
   mineKey = "";
@@ -256,6 +257,10 @@ export class Game {
         void this.save();
         return;
       }
+      if(el.id === "graphicsQuality") {
+        this.settings.graphicsQuality=graphicsQuality(el.value);
+        this.applySettings();return;
+      }
       if (el.id in this.settings) {
         (this.settings as unknown as Record<string, number>)[el.id] = Number(
           el.value,
@@ -279,6 +284,10 @@ export class Game {
     this.settings.simulationDistance = Math.round(clamp(finite(this.settings.simulationDistance, 4), 2, 6));
     this.settings.sensitivity = clamp(finite(this.settings.sensitivity, 4), 1, 12);
     this.settings.volume = clamp(finite(this.settings.volume, 30), 0, 100);
+    this.settings.graphicsQuality=graphicsQuality(this.settings.graphicsQuality);
+    const profile=graphicsProfile(this.settings.graphicsQuality);
+    this.view.setGraphicsProfile(profile);
+    this.effects.setRainCount(profile.rainParticleCount);
     this.view.camera.fov = this.settings.fov;
     this.view.camera.updateProjectionMatrix();
     this.view.distance = this.settings.distance;
@@ -957,6 +966,7 @@ export class Game {
     }
     if (action === "reset-settings") {
       this.settings = {
+        graphicsQuality: "medium",
         fov: 75,
         sensitivity: 4,
         distance: 5,
@@ -1874,7 +1884,7 @@ export class Game {
       this.view.hand.rotation.z = -0.26 + Math.sin(t * 0.0021) * 0.01;
       this.view.hand.position.y = -0.64 + heldSway * 0.005;
       this.view.environment(this.time, this.simulation.weather === "rain",this.status.has("night_vision"),dt);
-      this.entityView.update(this.entities, t / 1000);
+      this.entityView.update(this.entities, t / 1000,this.view.camera,this.view.graphicsProfile);
       this.effects.update(dt, p, this.view.atmosphere.rain*this.view.rainExposure, t / 1000);
       if (
         this.lighting.pending ||
@@ -1916,7 +1926,7 @@ export class Game {
           hitFlash: this.hitFlash > 0,
           hitMessage: this.hitFlash > 0 ? this.hitMessage : "",
           debug: this.debug
-            ? `Generator ${this.world.generatorVersion} · ${geography?.region ?? "legacy geography"} · ${geography?.reservation ?? "no landmark reserve"}\n${geography ? `Slope ${geography.slope.toFixed(2)} · buildable ${geography.buildable} · plan ${geography.planMs.toFixed(1)} ms / ${this.world.planCount} active` : "Legacy v3 terrain retained"}\n${urbanDebug}${landmarkDebug ? `\n${landmarkDebug.name} · ${landmarkDebug.reservation.id}` : ""}\n${this.fps} FPS · target 20 TPS\nFrame p50/p95 ${this.view.metrics.summary("frame").p50.toFixed(1)}/${this.view.metrics.summary("frame").p95.toFixed(1)} ms · tick p95 ${this.view.metrics.summary("tick").p95.toFixed(1)} ms\n${this.world.chunks.size} chunks · ${this.world.pending.size} generating · ${this.world.dirty.size} mesh queue\n${this.view.worldRenderStats.triangles} triangles · ${this.view.worldRenderStats.calls} draws · ${this.view.renderer.info.memory.geometries} geometries\n${this.entities.list.length} entities · ${this.entities.life?.metrics.active ?? "legacy"} active residents · ${this.entities.navigation.agents.size} routes / ${this.entities.navigation.expandedLastTick} nodes\nLife ${this.entities.life?.metrics.scheduleMs.toFixed(2) ?? "0"} ms · nav ${this.entities.navigation.solveMs.toFixed(2)} ms · ${this.entities.life?.event?.title ?? "no gathering"}\n${this.view.atmosphere.phase} · fog ${this.view.atmosphere.fogNear.toFixed(0)}/${this.view.atmosphere.fogFar.toFixed(0)} · LOD ${this.view.distant?.stats.terrainTriangles??0}+${this.view.distant?.stats.anchorTriangles??0} triangles\n${this.world.evictionBlocked} pinned unsaved chunks\nCPU block arrays ~${([...this.world.chunks.values()].reduce((n,c)=>n+c.blocks.byteLength,0)/1048576).toFixed(1)} MiB (excludes GPU/heap)\n${this.world.edits.size} edits · save rev ${this.saveRevision} · ${this.meta.seed}`
+            ? `${this.view.graphicsDebug()}\nResidents rendered ${this.entityView.stats.full}/${this.entityView.stats.mid}/${this.entityView.stats.far} full/mid/far · ${this.entityView.stats.culled} culled\nGenerator ${this.world.generatorVersion} · ${geography?.region ?? "legacy geography"} · ${geography?.reservation ?? "no landmark reserve"}\n${geography ? `Slope ${geography.slope.toFixed(2)} · buildable ${geography.buildable} · plan ${geography.planMs.toFixed(1)} ms / ${this.world.planCount} active` : "Legacy v3 terrain retained"}\n${urbanDebug}${landmarkDebug ? `\n${landmarkDebug.name} · ${landmarkDebug.reservation.id}` : ""}\n${this.fps} FPS · target 20 TPS\nFrame p50/p95 ${this.view.metrics.summary("frame").p50.toFixed(1)}/${this.view.metrics.summary("frame").p95.toFixed(1)} ms · tick p95 ${this.view.metrics.summary("tick").p95.toFixed(1)} ms\n${this.world.chunks.size} chunks · ${this.world.pending.size} generating · ${this.world.dirty.size} mesh queue\n${this.view.worldRenderStats.triangles} triangles · ${this.view.worldRenderStats.calls} draws · ${this.view.renderer.info.memory.geometries} geometries\n${this.entities.list.length} entities · ${this.entities.life?.metrics.active ?? "legacy"} active residents · ${this.entities.navigation.agents.size} routes / ${this.entities.navigation.expandedLastTick} nodes\nLife ${this.entities.life?.metrics.scheduleMs.toFixed(2) ?? "0"} ms · nav ${this.entities.navigation.solveMs.toFixed(2)} ms · ${this.entities.life?.event?.title ?? "no gathering"}\n${this.view.atmosphere.phase} · fog ${this.view.atmosphere.fogNear.toFixed(0)}/${this.view.atmosphere.fogFar.toFixed(0)} · LOD ${this.view.distant?.stats.terrainTriangles??0}+${this.view.distant?.stats.anchorTriangles??0} triangles\n${this.world.evictionBlocked} pinned unsaved chunks\nCPU block arrays ~${([...this.world.chunks.values()].reduce((n,c)=>n+c.blocks.byteLength,0)/1048576).toFixed(1)} MiB (excludes GPU/heap)\n${this.world.edits.size} edits · save rev ${this.saveRevision} · ${this.meta.seed}`
             : "",
         });
       }
@@ -1927,7 +1937,7 @@ export class Game {
     } else {
       this.view.target(null);
       this.view.environment(0.23);
-      this.entityView.update(this.entities, t / 1000);
+      this.entityView.update(this.entities, t / 1000,this.view.camera,this.view.graphicsProfile);
       if (
         this.lighting.pending ||
         (t - this.lastLighting > 2000 && this.world.pending.size === 0)

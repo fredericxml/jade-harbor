@@ -1,6 +1,6 @@
 # Architecture
 
-`Game` coordinates authoritative state, fixed simulation ticks, input, and UI. Three.js renders state but does not own blocks. World planning and Panda realization remain deterministic, editable voxel generation.
+`Game` coordinates authoritative state, fixed simulation ticks, input and UI. Three.js renders state but does not own blocks. `Game` is still large; further interaction extraction is a maintenance priority. Existing city planning/panda realization remain deterministic editable voxel generation.
 
 ## World generation
 
@@ -8,9 +8,9 @@
 
 The central city and Panda keep their original level; western neighborhoods use Y24 parcels and half-step road approaches. New harbor, river, range, pass, cliff and outer staging terrain are realized before structure writes. Future reservations suppress ordinary occupancy and protect foundations. V3/v4/v5 remain frozen reconstruction implementations; v6 adds the realized landmark layer.
 
-A v5 world retains that exact macro plan and reservations, then constructs ten district specifications, road junction/grade metadata, urban blocks, accepted lots and per-chunk indices. `metropolis/districts.ts` owns the functional/architectural contracts; `plan.ts` owns deterministic selection, envelopes, access and index construction; `grading.ts` joins and grades street segments; `architecture.ts` realizes bounded voxel assemblies. `generator-v5.ts` owns the new terrain/pad/road/canal composition. The original city renderer and v3/v4 generators remain available for reconstruction.
+A v5 world retains that exact macro plan and reservations, then constructs ten district specifications, road junction/grade metadata, urban blocks, accepted lots and per-chunk indices. `metropolis/districts.ts` owns the functional/architectural contracts; `plan.ts` owns deterministic selection, envelopes, access and index construction; `grading.ts` joins and grades street segments; `architecture.ts` realizes bounded voxel assemblies. `generator-v5.ts` owns the new terrain/pad/road/canal composition. The original city renderer and v3/v4 generators remain untouched.
 
-Lot IDs derive from district and world coordinates. Local hash streams select archetypes, floor counts, roofs, facades, balconies and arcades. Recent neighbor choices receive a weight penalty, without changing the district's dominant family. Every roof/decoration stays within the two-block envelope. Entrances connect to indexed access paths; a rejected access rejects the parcel. Grades use established city heights and bounded half-step approaches outside the core. The original residents consume a projected `CityPlan`; NPC AI and job counts are unchanged.
+Lot IDs derive from district and world coordinates. Local hash streams select archetypes, floor counts, roofs, facades, balconies and arcades. Recent neighbor choices receive a weight penalty, without changing the district's dominant family. Every roof/decoration stays within the two-block envelope. Entrances connect to indexed access paths; a rejected access rejects the parcel. Grades use fixed original geography design city heights and bounded half-step approaches outside the core. The original residents consume a projected `CityPlan`; NPC AI and job counts are unchanged.
 
 ## Landmark composition
 
@@ -50,7 +50,7 @@ Timer and plate sources share the real power propagation map with switches/wires
 
 See `save-schema.md` for the atomic IndexedDB checkpoint contract and `engine-reliability.md` for the current persistence and lifecycle invariants. Simulation state, machine slot contents, effects and section changes are captured synchronously before asynchronous database work. Saves share a serial queue and expected revisions. Persistent imports/reconstruction are strict-schema validated; corruption never silently regenerates a world. Damaged component/checkpoint/chunk data can be reset through an atomic full-replacement recovery path as long as the independent world metadata is still valid. There is no cloud sync, migration or automatic stale-tab merge.
 
-There is only one dimension. A future dimension system would require dimension-qualified chunk/component ownership and transactional player transitions; decorative portal blocks alone would not be sufficient. Multiplayer is not included in this release.
+There is only one dimension. A proper dimension architecture must introduce dimension-qualified chunk/component ownership and transactional player transitions before exposing portals; adding decorative portal blocks is explicitly insufficient. Multiplayer is not part of the v1.0.0 release scope.
 
 
 ## Living city runtime
@@ -85,7 +85,7 @@ The fabric planner grows accepted parcels into safe gaps, compacts minor streets
 
 `city-life/travel.ts` defines version-aware destination identity, discovery policy and supported arrival checks. Game owns one cancellable travel request tied to the current World, pauses simulation during save/loading, directs normal streaming to the destination, prepares collision/rendering and commits position/facing atomically. It refreshes the existing active set rather than spawning a crowd. All normal unlocks use the same achievements component. See `travel-journal.md` and `regional-destinations.md`.
 
-## Generator-10 architecture and city-life ownership
+## generator 10 ownership
 
 Generator 10 adds `metropolis/richness.ts` and a version-specific regional support-building renderer. It preserves every v9 parcel/ground-body union and route, then independently selects supported upper composition, roof bays/axes, facade and frontage. The complete v3–v9 generation inputs remain frozen. See [architectural-richness.md](architectural-richness.md).
 
@@ -98,3 +98,19 @@ The Travel Journal and discoveries project one typed place model with 33 discove
 `render/atmosphere.ts` owns a reusable cyclic phase/weather state and gradient sky. `View` applies it to existing voxel lighting, water, emission, clouds, fog and the existing entity lights. Rain remains capped and camera skylight gates outdoor drops. Clouds use one shared instanced draw. Equipment retains its own unfogged render pass. See [atmosphere](atmosphere.md).
 
 `render/distant-world.ts` owns one bounded terrain mesh, one merged silhouette mesh, one material and a section-coverage texture per world. It reads existing plans without generating or changing blocks. Actual meshed sections—including empty edited geometry—suppress proxies. Incremental build tasks, texture/geometry identities, old-world disposal and context recovery are explicit. The high-camera mesher retains the player window and adds at most five surface sections. See [distant world rendering](distant-world.md). Authoritative voxel world and distant representation are separate; no save or generator contract changes.
+
+## 2.0.1 graphics capability boundary
+
+`render/graphics.ts` owns frozen typed `GraphicsQuality`/`GraphicsProfile` values. Settings validate the enum once and pass concrete capabilities to View, EntityView, Effects and DistantWorld. Consumers use render scale, DPR cap, terrain sampling step, crown count, actor detail distances/cadence and atmospheric counts. There is no Auto or scattered gameplay quality branching. Future systems should consume presentation capabilities in their render adapters, leaving their authoritative updates independent.
+
+Game applies the profile in settings and passes it only to presentation. View distance 3–8 and simulation distance 2–6 remain independent controls; presets never change either. The generator 10 world, all released generators, 4, 080 identities, 96 active cap, AI/task cadence, navigation budget, time/weather and persistence schema are unchanged. Tests freeze every world/game/player/persistence file plus the actual Game tick and Travel methods against2.0.0.
+
+View owns one drawing-buffer policy: `min(deviceDPR, profile.dprCap) * profile.renderScale`, with finite fallback/minimum and no supersampling. CSS canvas size and DOM HUD stay at viewport resolution. Resize, fullscreen, profile changes and context restoration reuse this policy; renderer identity is cached at construction/restoration with a privacy-safe extension fallback.
+
+EntityView checks the existing active set before loaded-column work, then conservatively frustum-culls a 2.2 m actor sphere (near actors within 4 m retained). It rebuilds one bounded civilian batch, uploads only its used matrix/color ranges, reuses temporary containers and caches identity phases. High retains full poses; Medium/Low remove small distant parts and quantize only distant pose time. Actual actor positions and simulation always update normally. Noncivilian groups reuse shared geometry/materials. The already-shared dropped-item geometry is retained. Effects compact their bounded particles in place and adjust rain draw range/count without changing weather.
+
+DistantWorld preallocates typed attribute arrays, writes flat normals and bounds while producing vertices, and yields by terrain row or 32 proxy boxes. It reuses one cube template, material and coverage texture; no per-box BoxGeometry or final whole-mesh normal/conversion scan remains. A profile replacement keeps the old two meshes visible until both new meshes are complete, then disposes the old pair atomically. Rapid replacement closes abandoned generators and disposes any pending geometries. Travel reuses the current graph; world/menu/context disposal owns every resource. Coverage retains 16-block/24-section identity independently of coarser presentation sampling, reuses sets/coordinate caches and refreshes only for topology or authoritative edit revision.
+
+The section queue keeps nearest-first ordering and unchanged six-section/seven-ms budgets, caches parsed keys, skips empty scans and avoids topology revision churn on ordinary remesh. Eviction enumerates the 24 known signed vertical addresses. Tight section geometry spheres remain calculated by Three.js; terrain meshing, world streaming requests and worker generation ownership are unchanged.
+
+Backbuffer resizing is deferred to the start of the next View draw. Multiple preset/resize events before that draw coalesce into one native surface resize, using the final target profile. Profile capabilities, cloud/rain selection and camera aspect update normally; the actual GL resize never runs synchronously in a settings handler. Native software-renderer surface synchronization can still stall one frame and is measured/documented separately from CPU geometry construction.

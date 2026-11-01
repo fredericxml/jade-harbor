@@ -1,0 +1,152 @@
+[
+  {
+    "id": "district-heritage-day",
+    "position": {
+      "x": 0.5,
+      "y": 21.002,
+      "z": -111.5
+    },
+    "focus": {
+      "x": 0,
+      "y": 23,
+      "z": -48
+    },
+    "hour": 12,
+    "rain": false
+  },
+  {
+    "id": "district-market-day",
+    "position": {
+      "x": -247.5,
+      "y": 25.002,
+      "z": -215.5
+    },
+    "focus": {
+      "x": -290,
+      "y": 27,
+      "z": -216
+    },
+    "hour": 12,
+    "rain": false
+  },
+  {
+    "id": "district-hutong-day",
+    "position": {
+      "x": -143.5,
+      "y": 21.002,
+      "z": -19.5
+    },
+    "focus": {
+      "x": -210,
+      "y": 23,
+      "z": -20
+    },
+    "hour": 12,
+    "rain": false
+  },
+  {
+    "id": "district-harbor-day",
+    "position": {
+      "x": 120.5,
+      "y": 22.002,
+      "z": 340.5
+    },
+    "focus": {
+      "x": 170,
+      "y": 24,
+      "z": 340
+    },
+    "hour": 12,
+    "rain": false
+  },
+  {
+    "id": "region-willow-tulou-day",
+    "position": {
+      "x": -528.5,
+      "y": 26.002,
+      "z": 399.5
+    },
+    "focus": {
+      "x": -519.5,
+      "y": 34.002,
+      "z": 386.5
+    },
+    "hour": 12,
+    "rain": false
+  },
+  {
+    "id": "district-nightlife-night",
+    "position": {
+      "x": 0.5,
+      "y": 21.002,
+      "z": 188.5
+    },
+    "focus": {
+      "x": 0,
+      "y": 23,
+      "z": 245
+    },
+    "hour": 23,
+    "rain": false
+  },
+  {
+    "id": "district-harbor-rain",
+    "position": {
+      "x": 120.5,
+      "y": 22.002,
+      "z": 340.5
+    },
+    "focus": {
+      "x": 170,
+      "y": 24,
+      "z": 340
+    },
+    "hour": 15,
+    "rain": true
+  },
+  {
+    "id": "panda-day",
+    "position": {
+      "x": 0.5,
+      "y": 21.002,
+      "z": -21.5
+    },
+    "focus": {
+      "x": 0,
+      "y": 37,
+      "z": -48
+    },
+    "hour": 12,
+    "rain": false
+  },
+  {
+    "id": "city-high",
+    "position": {
+      "x": 105,
+      "y": 145,
+      "z": 135
+    },
+    "focus": {
+      "x": 0,
+      "y": 27,
+      "z": -80
+    },
+    "hour": 12,
+    "rain": false
+  },
+  {
+    "id": "ridge-high",
+    "position": {
+      "x": -140,
+      "y": 164,
+      "z": -460
+    },
+    "focus": {
+      "x": 160,
+      "y": 132,
+      "z": -630
+    },
+    "hour": 10,
+    "rain": false
+  }
+]

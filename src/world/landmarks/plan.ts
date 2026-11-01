@@ -15,7 +15,7 @@ const circle = (x: number, z: number, radius: number): Footprint => ({ kind: "po
 const expand = (r: Rect, pad: number): Rect => ({ x1: r.x1 - pad, x2: r.x2 + pad, z1: r.z1 - pad, z2: r.z2 + pad });
 const position = (x: number, y: number, z: number): Position => ({ x, y, z });
 
-/** Consumes the already-resolved Shot 1 reservations. No candidate search, extra
+/** Consumes the already-resolved geographic reservation plan. No candidate search, extra
  * reservation ownership or eager voxel construction is introduced here. */
 export function createRealizationPlan(m: MacroPlan, reservations: LandmarkPlan, urban: UrbanPlan): RealizationPlan {
   const components: Component[] = [], sites: LandmarkInstance[] = [], approaches: Approach[] = [];

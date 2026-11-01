@@ -1,11 +1,24 @@
-# Atmosphere
+# Day, night, and weather
 
-`render/atmosphere.ts` owns deterministic presentation of the existing clock and clear/rain weather. It adds no simulation, generator, database or save fields. Pre-dawn, sunrise, morning, midday, late afternoon, sunset, blue hour and night interpolate through a cyclic color/intensity table with smooth easing. Reused linear-space Colors and a direction vector avoid frame-by-frame color allocation. Invalid inputs receive finite defaults and view distance stays clamped to 3–8.
+Jade Harbor's atmosphere changes as the world clock moves through the day. The sky, horizon, fog, and exterior colors transition through pre-dawn, sunrise, morning, midday, late afternoon, sunset, blue hour, and night.
 
-The sky is one lightweight gradient sphere with an inexpensive directional sun cue. The horizon, fog and zenith share the same state. A bounded weather blend takes the edge off clear/rain transitions; sunlight is suppressed, colors desaturate, clouds darken and haze strengthens. Night keeps cool exterior fill and readable silhouettes, with warmer existing voxel emission around commercial, central/ceremonial and harbor areas. There are no new shadow maps, dynamic lantern lights, NPC lights or post-processing passes.
+## Day and night
 
-The terrain shader retains the authoritative skylight/block-light attributes. Underground faces keep the existing low ambient floor; outdoor color does not replace voxel skylight. The camera's actual skylight gates the 300-drop rain batch, and a below-grade camera hides sky/cloud/distant geometry. Night vision retains its existing status effect and bright presentation without increasing emission unboundedly. First-person equipment remains in its separate, unfogged depth-cleared pass.
+- **Morning and midday** bring brighter, clearer exterior colors.
+- **Late afternoon and sunset** warm the horizon and building silhouettes.
+- **Blue hour and night** shift the city toward cooler exterior tones while existing lantern and block-emission areas provide warmer accents.
+- **Night vision** remains available through its existing gameplay effect.
 
-All 28 clouds share one instanced draw, preserving the count with staggered placement/scale and cyclic motion. Rain remains one capped 300-point batch without per-drop world collision. Transparent water tiles receive a restrained time/weather tint; glass and ice are not classified as water.
+The lighting is stylized for readability and atmosphere. It does not use a full dynamic shadow-map or physically complete global-illumination system.
 
-Fog uses a near full-detail blend and a longer, softer distant blend rather than a solid cutoff wall. Supported distances, phase/weather combinations, cave behavior, HUD/equipment, night vision and context restoration have dedicated CPU/browser checks. See [testing results](quality-assurance.md) for executed scope and [performance](performance.md) for measured costs and limits.
+## Rain and clouds
+
+Rain darkens and desaturates the sky, strengthens haze, and changes the appearance of water and distant scenery. Clouds move slowly across the sky. Rain is a visual effect rather than a simulation of wet surfaces, drainage, or weather-driven flooding.
+
+Weather can also affect resident routines: optional outdoor social activity may move indoors or pause, while essential work and guard patrols continue.
+
+## Fog and distant scenery
+
+Fog softens the transition between nearby full-detail buildings and the distant landscape. Distant terrain and selected skyline silhouettes help frame the city from elevated viewpoints, while caves and below-ground views keep the sky presentation out of sight.
+
+Distant scenery is approximate and render-only. Nearby voxel geometry and player edits remain authoritative. See [distant-world rendering](distant-world.md) for technical details and [graphics and performance](performance.md) for preset behavior.

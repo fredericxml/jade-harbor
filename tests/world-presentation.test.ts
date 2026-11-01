@@ -6,7 +6,7 @@ import {journalPlaces,travelDestinations,travelUnlocked,travelColumns,safeTravel
 import {discoveryRegistry} from "../src/game/city-life/discoveries";
 import {Atmosphere} from "../src/render/atmosphere";
 import {distantPlan,distantSurface,DistantWorld,DISTANT_RADIUS} from "../src/render/distant-world";
-import frozenWorld from "./fixtures/generator-v10-frozen-world.json";
+import frozenWorld from "./fixtures/generator-v10-world.json";
 import discoveries from "./fixtures/journal-v9.json";
 const worlds:World[]=[];
 beforeAll(()=>{for(const seed of["jade-harbor","different-city"])worlds.push(new World(seed,{},false,10));});

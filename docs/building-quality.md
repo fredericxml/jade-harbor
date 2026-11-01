@@ -1,13 +1,22 @@
-# Building quality and structural variation
+# Building design and structural quality
 
-Generator 9 keeps generator 8's complete parcel plan, building design choices, family distribution and occupied-volume footprints. Irregular setbacks, height changes, corner wings, courts, split fronts, stepped forms and mixed roof grammars remain. Density is not reduced to simplify the renderer.
+Jade Harbor's buildings combine varied silhouettes with readable, supported voxel construction. Roofs, facades, balconies, gates, signs, and raised sections should look like parts of one building rather than disconnected decorative pieces.
 
-The released roof grammar allowed raised halves of split/stepped roofs to begin above the wall top without a deck or clerestory. The new assembly planner records every roof piece's body support elevation and eave elevation explicitly. Raised pieces receive a supported deck and perimeter walls. Adjacent roof sections share their join, and a short wing's roof is clipped against taller building bodies so tiles do not slice through a neighboring facade. Body shells use the union of occupied volumes to avoid duplicate interior facade fragments. Balconies receive timber corbels, courtyard lintels receive posts, and narrow windows remain bounded by real wall bays.
+## Supported building forms
 
-Planning validates integer body bounds, minimum roof dimensions, storeys and support levels once. The indexed per-chunk writer realizes those plans without a world-sized voxel bake or per-frame architectural scan. New regional buildings use complete perimeter beams, connected eaves, supported foundations and explicit entry paths. Roof variation remains physical geometry rather than color variation alone.
+- **Roofs** connect to the walls and supporting decks beneath them. Raised and split roof sections have a supported base rather than floating above the building.
+- **Connected roof sections** meet cleanly, and shorter wings are kept from cutting through taller neighboring walls.
+- **Facades** use actual wall bays and supporting beams for windows, shutters, screens, signs, and other attachments.
+- **Balconies and canopies** connect back to the building's floor or wall structure.
+- **Foundations and entrances** fit the local terrain and preserve usable access from the street.
+- **Courtyards and side wings** remain part of the building composition without filling the public routes around them.
 
-The regression suite checks the unchanged dense parcels/designs, supported raised roofs, safe entries and public activity targets. Automated checks supplement direct street, elevated and district review. They cannot certify every possible user edit or every arbitrary seed visually. Generators 3–8 retain their released world geometry.
+## Preserve the street plan
 
-## Generator-10 architectural and city-life integration
+Building variation stays inside the established parcels and height envelopes. Panda Plaza, roads, canals, public courts, landmark reservations, and access paths retain priority. This allows buildings to become more varied without sacrificing the city's density or walkability.
 
-Generator 10 preserves the generator-9 map envelope, parcel coordinates/entrances, occupied ground-body union, original landmark reservations, five regional destinations and under-five-percent generic forest policy. Architectural changes stay inside existing support pads and roof envelopes; regional support buildings share the new grammar while landmark-defining forms and public circuits remain intact. Generators 3–9 are frozen. See [architectural richness](architectural-richness.md), [purposeful city life](purposeful-city-life.md) and [Travel Journal](travel-journal.md) for the current extension and [testing results](quality-assurance.md) for acceptance evidence.
+## Visual and compatibility limits
+
+The building system is deterministic for a given seed and world-generation version. Older saved worlds retain their stored generation identity; an updated city layout is created as a separate save where supported.
+
+Automated structural checks and visual review cover representative districts, elevations, and building families. They cannot guarantee that every arbitrary player edit or every possible seed will remain visually perfect. Player edits remain authoritative and may intentionally change a generated building.

@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import {createHash} from "node:crypto";
 import {verifyReleaseManifest} from "../scripts/release-integrity.mjs";
 
-const output=process.env.JOURNAL_OUTPUT??"test-results/travel-journal",selected=process.env.JOURNAL_DESTINATIONS?.split(","),verify=process.env.JOURNAL_VERIFY_DIST!=="0",captures=process.env.JOURNAL_CAPTURES!=="0",seeds=(process.env.JOURNAL_SEEDS??"jade-harbor").split(",");
+const output=process.env.JOURNAL_OUTPUT??"test-results/travel-journal",selected=process.env.JOURNAL_DESTINATIONS?.split(","),verify=process.env.JOURNAL_VERIFY_DIST!=="0",captures=process.env.JOURNAL_CAPTURES!=="0",seeds=(process.env.JOURNAL_SEEDS??"jade-harbor,different-city").split(",");
 if(verify)verifyReleaseManifest();
 const source=verify?createHash("sha256").update(JSON.stringify(JSON.parse(await readFile("dist/release-integrity.json","utf8")).source)).digest("hex"):null;
 const harness=createHash("sha256").update(await readFile(new URL(import.meta.url))).digest("hex");
@@ -22,7 +22,7 @@ try {
   await mkdir(output,{recursive:true});await new Promise((ok,fail)=>{server.stdout.on("data",b=>{if(b.toString().includes("Local:"))ok();});server.on("error",fail);server.on("exit",c=>fail(Error(`server ${c}`)));});
   browser=await chromium.launch({headless:true,args:["--no-sandbox","--use-angle=swiftshader","--enable-unsafe-swiftshader","--disable-dev-shm-usage"]});
   page=await browser.newPage({viewport:{width:960,height:600}});page.setDefaultTimeout(180000);page.on("pageerror",e=>errors.push(e.message));
-  await page.addInitScript(()=>localStorage.setItem("jade-harbor-settings",JSON.stringify({distance:3,simulationDistance:4})));
+  await page.addInitScript(()=>localStorage.setItem("jade-harbor-settings",JSON.stringify({graphicsQuality:'high',distance:3,simulationDistance:4})));
   await page.goto("http://127.0.0.1:4187");await page.locator('[data-action="new"]').click();await page.locator('[data-action="create"]').click();await page.waitForFunction(()=>window.__game?.active);
   const open=async()=>{await page.evaluate(()=>{const g=window.__game;g.pause();});await page.locator('[data-action="journal"]').click();};
   for(const seed of seeds) {

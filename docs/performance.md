@@ -1,92 +1,96 @@
-# Performance and measurement
+# Graphics performance
 
-Jade Harbor `2.0.0` is designed around bounded world generation, chunk streaming, local simulation, and render-only distant scenery. Performance depends strongly on browser, GPU, resolution, driver, and the density of the current view. The measurements below are engineering observations, not universal frame-rate promises.
+Jade Harbor `2.0.1` adds three graphics presets and reduces several avoidable rendering costs while preserving the generator-10 world, resident population, gameplay simulation, and save format.
 
-## Measurement environment
+## Graphics presets
 
-The recorded browser performance runs used Linux, Chromium 141, and ANGLE SwiftShader software rendering. This is a software renderer, not a physical desktop GPU. Frame intervals are not GPU execution times, and results must not be extrapolated directly to Intel, AMD, or NVIDIA hardware.
+| Setting | Low | Medium (default) | High |
+|---|---:|---:|---:|
+| Render scale | 0.70 | 0.88 | 1.00 |
+| Device-pixel-ratio cap | 1.00 | 1.25 | 1.60 |
+| Terrain sample step | 48 blocks | 32 blocks | 16 blocks |
+| Selected crown buildings per district | 1 | 2 | 4 |
+| Full / mid resident render range | 16 / 32 m | 24 / 48 m | 960 / 960 m |
+| Distant pose cadence | 8 Hz | 15 Hz | 60 Hz |
+| Rain points | 90 | 180 | 300 |
+| Instanced clouds | 16 | 22 | 28 |
 
-F3 exposes rolling frame interval p50/p95, simulation tick p95, loaded columns, pending generation, dirty section queues, triangles, draw calls, renderer geometry count, entity count, pinned unsaved columns, and approximate CPU block-buffer memory. The memory figure excludes JavaScript object overhead, light maps, and GPU/driver storage.
+High preserves the established `2.0.0` presentation. Medium is the default for new users and for older settings that do not contain a graphics-quality value. Low and Medium reduce render resolution, selected far-body detail, distant pose cadence, and secondary atmospheric density. All three presets retain the same buildings, landmarks, residents, world data, AI schedules, navigation limits, and gameplay simulation. CSS UI dimensions, camera field of view, pointer mapping, input sensitivity, and selection rays are independent of the render backbuffer scale.
 
-For a target-machine comparison, record the browser/version, GPU renderer, viewport, device pixel ratio, seed, view distance, simulation distance, and preset settings. Use the same seed, camera, time, weather, and viewport for each comparison. Allow streaming to settle, then observe each location for at least 60 seconds.
+F3 displays the selected preset, render scale, effective DPR, CSS-to-backbuffer dimensions, WebGL version, and available renderer/vendor diagnostics. Browser privacy restrictions may hide the unmasked renderer identity. A software-renderer hint is diagnostic only; it does not prove that hardware acceleration is disabled.
 
-## Bounded rendering and simulation
+## What changed
 
-| System | Current bound or behavior |
-|---|---|
-| Voxel section | 16×16×16 blocks; empty sections allocate no block buffer and uniform sections use one scalar |
-| Detailed player view | Nine-section player window, with up to five additional surface sections for elevated views |
-| Distant terrain | 16-block sample grid, up to 128×128 cells, approximately 25,724 terrain triangles in the default plan |
-| Distant skyline anchors | Selected render-only building silhouettes; default plan uses up to 1,111 boxes / 13,332 triangles |
-| Distant resource ownership | Two geometries, one material, one coverage texture, and two mesh draws; the graph is reused across ordinary travel |
-| Distant range | 720-block distant radius; camera far plane 960; sky radius 800; 24-block near exclusion |
-| Clouds and rain | 28 clouds in one instanced draw; rain is one capped 300-point batch |
-| Resident detail | 4,080 persistent identities; at most 96 detailed active residents |
-| Navigation | Bounded local search and a shared 96-expanded-node / nominal 2 ms tick budget |
-| Travel | Collision-checked local arrival search; request deadline is three seconds including save preparation |
+- Distant terrain and skyline geometry use preallocated typed arrays and a shared cube template. Flat normals and bounds are accumulated as geometry is written, avoiding a large final array conversion and whole-mesh finalization pass.
+- Distant construction yields between terrain rows and small proxy batches instead of processing the complete proxy set in one uninterrupted update.
+- Resident rendering checks the existing active set, conservatively culls offscreen actors, reuses temporary containers, and uploads only used instance ranges. The simulation active set is unchanged.
+- Particle compaction reuses its array; rain draw counts scale with the selected preset.
+- The section mesh queue caches parsed signed-height keys, skips empty scans, and avoids unnecessary topology-revision changes.
+- Drawing-buffer resizing is deferred until the next render and repeated settings changes are coalesced into one native resize.
 
-These are implementation bounds, not guarantees that every frame completes within a fixed time. A busy section mesh, lighting scan, or final distant-buffer construction can still be indivisible.
+The renderer keeps the existing mesh budgets, world-generation ownership, resident simulation, and navigation limits. The old distant graph remains visible until its replacement is complete; abandoned replacement work is disposed safely.
 
-## Representative software-renderer observations
+## Measured results
 
-The final eight-scene presentation comparison used Chromium/SwiftShader at 960×600. Each view ran for twenty real seconds after the rolling metrics were reset. The table reports frame-interval p50/p95 in milliseconds for the current release; it is not a physical-GPU benchmark.
+### Test environment and method
 
-| View | Frame p50 / p95 (ms) |
-|---|---:|
-| Panda Plaza, day | 50.0 / 133.3 |
-| Panda Plaza, night | 66.6 / 150.1 |
-| Market, day | 116.6 / 233.4 |
-| Harbor, rain | 83.4 / 216.6 |
-| Water Town, night | 83.4 / 216.6 |
-| Imperial Quarter, sunset | 83.3 / 183.3 |
-| Ridge, elevated view | 33.4 / 149.9 |
-| City, elevated view | 50.0 / 133.3 |
+The matched browser measurements used Linux, Node 24.22.1, Chromium 141.0.7390.37, WebGL2, and ANGLE Vulkan SwiftShader software rendering. No physical integrated or discrete GPU was available for this measurement. The results must not be interpreted as desktop-GPU FPS.
 
-The current renderer submits more useful terrain and skyline geometry in high views than the earlier city-only renderer. That additional presentation has a measurable cost in the software-renderer environment. The result should not be described as a universal FPS improvement or regression on physical GPUs.
+Ten fixed views were measured at view distances 3, 5, and 8, with simulation distance 4, a 960 × 600 viewport, DPR 1, and the `jade-harbor` seed. The baseline used the `2.0.0` presentation; the current build was measured at High, Medium, and Low. Each window ran the ordinary simulation for 12 seconds after equivalent scene preparation and a 1.5-second settling period. The complete matrix contains 30 baseline and 90 current windows. These are prepared live-view samples, not a cold-start or uninterrupted travel benchmark.
 
-The 97-view prepared presentation matrix observed peaks of 423,930 submitted world triangles, 443 world draws, 787 renderer geometries, two textures, and 291 retained columns, with zero pending requests in prepared snapshots and no more than 96 detailed residents. These are observed matrix peaks, not steady-state memory ceilings.
+The table shows the median of the ten per-view frame-interval summaries at each view distance. Values are milliseconds; lower is better. They are frame intervals, not average FPS.
 
-## Distant-world construction and stutter
+| View distance | 2.0.0 p50 / p95 | 2.0.1 High p50 / p95 | Medium p50 / p95 | Low p50 / p95 |
+|---|---:|---:|---:|---:|
+| 3 | 91.7 / 208.4 | 91.7 / 200.0 | 66.7 / 166.6 | 50.0 / 133.3 |
+| 5 | 133.3 / 233.4 | 141.4 / 250.0 | 100.0 / 225.0 | 83.2 / 191.7 |
+| 8 | 200.0 / 358.4 | 200.0 / 333.3 | 191.6 / 308.3 | 166.6 / 316.6 |
 
-The distant representation is built incrementally, then reused across ordinary travel. Stable distant-update CPU cost during a rain/rapid-turn streaming observation was approximately 2.1 ms p50 / 3.6 ms p95.
+At the default view distance of 5, High is broadly similar to the baseline rather than uniformly faster. Medium and Low reduce the median frame interval in this software-renderer test, but maximum view distance remains expensive. Individual p95 values vary by scene and are not monotonic across presets.
 
-Construction is a different cost from steady-state updating. Recorded observations include:
+### Distant construction
 
-- one prepared presentation matrix: 155.4 ms accumulated build CPU, with a 48.1 ms largest slice;
-- a separate maximum-distance rain traversal: 58.2 ms largest slice;
-- an expanded rain/rapid-turn reconstruction observation: 333.1 ms accumulated build CPU, with a **141.2 ms largest slice**.
+| CPU construction statistic | 2.0.0 High | 2.0.1 High | 2.0.1 Medium | 2.0.1 Low |
+|---|---:|---:|---:|---:|
+| Median largest update | 23.8 ms | 2.4 ms | 1.2 ms | 0.7 ms |
+| Worst update | 35.0 ms | 3.5 ms | 1.9 ms | 1.1 ms |
+| Median build CPU sum | 79.8 ms | 33.3 ms | 9.0 ms | 4.7 ms |
+| Worst constructor, including plan | 18.3 ms | 14.7 ms | 3.1 ms | 2.7 ms |
 
-The largest slice comes from final buffer construction/normal calculation that remains indivisible. It can cause a noticeable one-time hitch during world reconstruction or first distant-scene creation. Ordinary travel reuses the completed distant graph and does not rebuild it on the travel critical path. This is a documented limitation, not a hard two-millisecond frame guarantee.
+A separate matched browser comparison reduced the worst distant-build slice from 60.9 ms to 9.9 ms. Measured build slices above 50 ms fell from 4 of 30 baseline windows to 0 of 90 current windows. These results show a substantial improvement to the distant-geometry construction path. They do not guarantee that every frame remains below a fixed time budget; JIT, allocation, garbage collection, WebGL uploads, lighting, and voxel meshing can still create stalls.
 
-## Travel and resident activity
+### Native drawing-buffer resize
 
-The primary Travel Journal matrix covered all 18 hubs on two seeds in Creative and Spectator modes: 72 successful actual UI trips. Preparation measured 281.7 ms median, 506.0 ms p95, and 529.7 ms maximum in that matrix. An expanded 54-trip integration repeat recorded a 1,466.3 ms maximum; the three-second request deadline remained unchanged.
+Repeated graphics changes are coalesced: eighteen same-turn changes produce one native drawing-buffer resize. The settings handler remains short, and the final requested profile is applied at the next draw. Native software-WebGL surface allocation can still stall: the full DPR2 stress test recorded a 525.1 ms native resize. This is a software-driver synchronization limitation, distinct from the reduced distant-geometry construction cost.
 
-A seven-view resident-activity observation ran for 450 real seconds. The minimum moving/acting sample ratio was 66.7%, and the actor-sample-weighted ratio was 85.0%. The registry remains 4,080 persistent residents, with detailed activity bounded to 96 active residents. These figures describe the selected views and schedules, not a guarantee that every camera angle always shows the same number of residents.
+## Validate on a desktop PC
 
-## Persistence microprofile
+For a meaningful hardware comparison:
 
-A seven-sample Node v22.16.0 Linux x86_64 engineering run measured approximately:
+1. Use the same browser and window size for all presets.
+2. Set View Distance to 5 and Simulation Distance to 4.
+3. Open F3 and record the renderer identity, effective DPR, and backbuffer size.
+4. At Panda Plaza and the Market, let streaming settle before sampling.
+5. Observe High, Medium, and Low for at least 60 seconds from the same camera, time, and weather.
+6. Compare FPS alongside frame p50/p95, tick/mesh/distant p95, largest build slice, draw calls, triangles, loaded columns, and pending/dirty queues.
+7. Repeat in rain and from an elevated viewpoint if those scenes matter to the intended use.
 
-| Operation | Median observation |
-|---|---:|
-| Validate a save containing 50,000 edits | 90 ms |
-| Encode 50,000 edits into canonical chunk deltas | 81 ms |
-| Checksum the resulting chunk payloads | 7 ms |
-| Capture one fully edited 16×16×16 section | 2.7 ms |
+Low is intended to improve playability on suitable modern integrated graphics. A 40+ FPS result is a target for real-machine validation, not a universal promise or a result certified by the included software-renderer measurements.
 
-These are CPU point samples, not browser frame times. Ordinary incremental saves encode dirty sections rather than re-encoding the entire edit overlay.
+## Reproduce the measurements
 
-## Historical baseline
+After `npm ci` and `npx playwright install chromium`:
 
-The original `1.0.0` deterministic CPU benchmark generated 97 city columns in 1,221 ms, rebuilt full-column lighting in 1,500 ms, and generated exposed-face meshes in 3,287 ms, with 1,353,746 triangles. The benchmark includes full vertical columns, including geometry normally deferred by the browser renderer. It is a historical CPU reference, not a GPU or sustained-frame benchmark.
+```bash
+npm run build
+npm run test:graphics-quality
+npm run test:graphics-quality:browser
+npm run profile:graphics-quality
+npm run profile:distant-rendering
+```
 
-## Practical interpretation
+Run browser and CPU profilers serially. The live profile writes captures and raw measurements to `test-results/`, which is not part of the release archive. Optional environment variables can select subsets for diagnosis; a partial run must not be described as the complete matrix.
 
-- The engine bounds chunk, entity, navigation, and distant-resource ownership, but individual CPU operations can still exceed a frame budget.
-- Software-renderer frame times are not representative of a hardware-accelerated desktop by default.
-- Lower view distance reduces the amount of detailed world submitted; it does not change the stored world or resident registry.
-- Travel preparation latency is separate from the time required for background meshes and local detail to settle.
-- No universal 40 FPS or 60 FPS guarantee is made. Measure on the actual target PC.
+## Remaining costs
 
-See [known limitations](known-limitations.md) and [testing results](quality-assurance.md) for the related product and verification boundaries.
+Voxel meshing is still primarily main-thread work, and one busy section remains indivisible. Lighting, large edits, cold world planning, browser allocation/GC, GPU uploads, and native WebGL surface synchronization can still cause frame-time spikes. The distant rendering layer is an approximate visual cache; it does not replace nearby full-detail voxel chunks. See [known limitations](known-limitations.md) and [distant world rendering](distant-world.md).

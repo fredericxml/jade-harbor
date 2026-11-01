@@ -42,6 +42,16 @@ try {
     if (r.status() >= 400) errors.push(`${r.status()} ${r.url()}`);
   });
   await page.goto(process.env.PRODUCTION_URL ?? "http://127.0.0.1:4175");
+  await page.locator('[data-action="settings"]').click();
+  assert.equal(await page.locator('#graphicsQuality').inputValue(),"medium","fresh production uses balanced quality");
+  for(const quality of["high","medium","low","medium"]){
+    await page.selectOption('#graphicsQuality',quality);
+    await page.waitForFunction(q=>{const c=document.querySelector('canvas'),cap={high:1.6,medium:1.25,low:1}[q],scale={high:1,medium:.88,low:.7}[q],ratio=Math.min(devicePixelRatio,Math.max(.25,Math.min(devicePixelRatio,cap)*scale));return c.width===Math.floor(innerWidth*ratio)&&c.height===Math.floor(innerHeight*ratio);},quality);
+    const result=await page.evaluate(()=>{const c=document.querySelector('canvas'),r=c.getBoundingClientRect(),gl=c.getContext('webgl2');return{css:[r.width,r.height],buffer:[gl.drawingBufferWidth,gl.drawingBufferHeight],dpr:devicePixelRatio};});
+    const cap={high:1.6,medium:1.25,low:1}[quality],scale={high:1,medium:.88,low:.7}[quality],ratio=Math.min(result.dpr,Math.max(.25,Math.min(result.dpr,cap)*scale));
+    assert.deepEqual(result.css,[960,700]);assert.deepEqual(result.buffer,[Math.floor(960*ratio),Math.floor(700*ratio)]);
+  }
+  await page.locator('[data-action="back"]').click();
   await page.locator('[data-action="new"]').click();
   await page.locator("#world-name").fill("Production smoke");
   await page.locator('[data-action="create"]').click();
@@ -77,6 +87,7 @@ try {
     status: "passed",
     checks: [
       "production bundle loads",
+      "production preset selector changes actual WebGL buffers while retaining CSS size",
       "WebGL2 context active",
       "dev hook absent",
       "world creation and pointer lock",

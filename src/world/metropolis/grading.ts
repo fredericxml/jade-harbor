@@ -6,7 +6,7 @@ import type { UrbanRoad } from "./plan";
 
 /** Split streets at shared junctions before grading them. The graph relaxation
  * limits grade to 0.45; quantized half-block surfaces remain walkable. Urban
- * terrace levels are fixed by Shot 1. Outside town only the road ribbon changes. */
+ * terrace levels are defined by the original geographic plan. Outside town only the road ribbon changes. */
 export function gradeRoads(m:MacroPlan,roads:UrbanRoad[]):UrbanRoad[]{
   type Segment={road:number;a:Point;b:Point;cuts:number[]};
   const segments:Segment[]=[];

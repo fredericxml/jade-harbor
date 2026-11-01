@@ -7,12 +7,12 @@ import assert from 'node:assert/strict';
 import {verifyReleaseManifest} from '../scripts/release-integrity.mjs';
 verifyReleaseManifest();
 const source=createHash('sha256').update(JSON.stringify(JSON.parse(await readFile('dist/release-integrity.json','utf8')).source)).digest('hex');
-const output=process.env.PRESENTATION_MATRIX_OUTPUT??'test-results/presentation-matrix',selected=process.env.PRESENTATION_MATRIX_VIEWS?.split(','),records=[],errors=[];
+const output=process.env.WORLD_PRESENTATION_OUTPUT??'test-results/world-presentation',selected=process.env.WORLD_PRESENTATION_VIEWS?.split(','),records=[],errors=[];
 const server=spawn(process.execPath,['node_modules/vite/bin/vite.js','--host','127.0.0.1','--port','4190','--strictPort'],{stdio:['ignore','pipe','pipe']});let browser,page;
 try{
  await mkdir(output,{recursive:true});await new Promise((ok,no)=>{server.stdout.on('data',d=>{if(d.toString().includes('Local:'))ok();});server.on('error',no);server.on('exit',c=>no(Error('server '+c)));});
  browser=await chromium.launch({headless:true,args:['--no-sandbox','--use-angle=swiftshader','--enable-unsafe-swiftshader','--disable-dev-shm-usage']});page=await browser.newPage({viewport:{width:960,height:600}});page.setDefaultTimeout(180000);page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')errors.push(m.text());});
- await page.addInitScript(()=>localStorage.setItem('jade-harbor-settings',JSON.stringify({distance:3,simulationDistance:4})));
+ await page.addInitScript(()=>localStorage.setItem('jade-harbor-settings',JSON.stringify({graphicsQuality:'high',distance:3,simulationDistance:4})));
  await page.goto('http://127.0.0.1:4190');await page.locator('[data-action="new"]').click();await page.locator('[data-action="create"]').click();await page.waitForFunction(()=>window.__game?.active);
  const fixtures=await page.evaluate(async()=>{
   const g=window.__game,{travelDestinations}=await import('/src/game/city-life/travel.ts'),hubs=travelDestinations(g.world),views=[];
@@ -66,7 +66,7 @@ try{
    return{cameraAir:g.world.get(Math.floor(p.x),Math.floor(p.y+1.61),Math.floor(p.z))===0};
   },f);
   // A high proxy-view camera can cross a tall natural slope. It is a QA error
-  // to use an occluded camera; never erase geometry to simplify the view.
+  // to use an occluded camera; never erase geometry to clear the camera view.
   assert(state.cameraAir,`Camera embedded at ${f.id}`);
   await page.waitForFunction(()=>window.__game.view.distant?.stats.ready);await page.waitForTimeout(250);
   const metrics=await page.evaluate(()=>{const g=window.__game,v=g.view,l=v.distant,p=v.camera.position;v.environment(g.time,g.simulation.weather==='rain',g.status.has('night_vision'));v.updateDistant(g.world);v.render();return{render:{...v.worldRenderStats},geometries:v.renderer.info.memory.geometries,textures:v.renderer.info.memory.textures,columns:g.world.chunks.size,pending:g.world.pending.size,dirty:g.world.dirty.size,active:g.entities.life.active.size,residents:g.entities.list.filter(e=>e.kind==='villager').length,unique:new Set(g.entities.list.map(e=>e.id)).size,total:g.entities.list.length,near:v.camera.near,far:v.camera.far,fog:[v.atmosphere.fogNear,v.atmosphere.fogDetail,v.atmosphere.fogFar],lod:{...l.stats},lodGroups:v.scene.children.filter(n=>n.name==='render-only-distant-world').length,covered:l.coverage.filter(v=>v>0).length,phase:v.atmosphere.phase,camera:{x:p.x,y:p.y,z:p.z},position:{...g.body.position}};});

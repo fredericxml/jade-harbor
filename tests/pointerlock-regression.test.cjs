@@ -56,7 +56,11 @@ class MeshBasicMaterial{constructor(opts){Object.assign(this,opts)}dispose(){thi
 class Mesh{constructor(geo,mat){this.geometry=geo;this.material=mat;this.position={set:(...v)=>this.xyz=v};this.rotation={z:0}}}
 const TH={BoxGeometry,Float32BufferAttribute,MeshBasicMaterial,Mesh};
 const defs={4:{block:4,color:'#cc7755'},135:{tool:'pickaxe',color:'#87dba5'},139:{tool:'sword',color:'#aaccdd'},103:{category:'Materials',color:'#88cbaa'}};
-const sourceMethod=rendererSource.match(/  setHeldItem\(id: number \| null\) \{[\s\S]*?\n  \}\n  resize\(\)/)[0].replace(/\n  resize\(\)$/,'');
+const rendererTree=ts.createSourceFile('renderer.ts',rendererSource,ts.ScriptTarget.ES2022,true);
+const viewClass=rendererTree.statements.find(n=>ts.isClassDeclaration(n)&&n.name?.text==='View');
+const heldMethod=viewClass?.members.find(n=>ts.isMethodDeclaration(n)&&n.name.getText(rendererTree)==='setHeldItem');
+assert(heldMethod,'View.setHeldItem must exist');
+const sourceMethod=heldMethod.getText(rendererTree);
 const sourceJS=ts.transpileModule('class T{'+sourceMethod+'}',{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
 const comp=Function('THREE','item',sourceJS+';return T')(TH,id=>defs[id]);
 for(const [label,Cl] of [['source',comp]]){
