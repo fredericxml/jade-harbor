@@ -1,3 +1,4 @@
+import { pressureTriggered } from "./occupancy";
 import { Automation, Hopper } from "./automation";
 import { World } from "../world/world";
 import { B, block } from "../world/blocks";
@@ -93,6 +94,8 @@ export class Simulation {
   specials = new Map<string, number>();
   indexed = new Map<string, number>();
   queue = new Set<string>();
+  /** Persisted work for chunks that are not currently resident. */
+  deferred = new Map<string, Set<string>>();
   radius = 64;
   elapsed = 0;
   weather = "clear";
@@ -113,7 +116,7 @@ export class Simulation {
     this.tickNo=Number(data?.tickNo??0);
     this.cropTimer=Number(data?.cropTimer??0);
     this.automation = new Automation(world,this.furnaces,data?.hoppers as Record<string,Hopper>|undefined);
-    for(const key of (data?.pendingTicks as string[]|undefined)??[])this.queue.add(key);
+    for(const key of (data?.pendingTicks as string[]|undefined)??[])this.enqueueKey(key);
     for (const [key, v] of world.edits)
       if ([B.Water, B.Lava, B.Sand, B.Gravel].includes(idOf(v) as never)) {
         const [x, y, z] = key.split(",").map(Number);
@@ -149,15 +152,40 @@ export class Simulation {
             this.specials.delete(k);
         }
       }
+    // Only promote deferred work once its chunk is resident. Cold chunks no
+    // longer consume the live simulation budget or rotate through every tick.
+    for (const [key, pending] of this.deferred) {
+      if (!this.world.chunks.has(key)) continue;
+      for (const workKey of pending) this.queue.add(workKey);
+      this.deferred.delete(key);
+    }
+  }
+  private enqueueKey(key: string) {
+    const parts = key.split(",").map(Number);
+    if (parts.length !== 3 || !parts.every(Number.isInteger)) return;
+    const [x, y, z] = parts;
+    if (y <= MIN_Y || y > MAX_Y || Math.abs(x) > 1e7 || Math.abs(z) > 1e7) return;
+    const chunk = `${chunkCoord(x)},${chunkCoord(z)}`;
+    if (this.world.loaded(x, z)) {
+      this.queue.add(key);
+      const pending = this.deferred.get(chunk);
+      pending?.delete(key);
+      if (pending?.size === 0) this.deferred.delete(chunk);
+    } else {
+      this.queue.delete(key);
+      let pending = this.deferred.get(chunk);
+      if (!pending) this.deferred.set(chunk, pending = new Set());
+      pending.add(key);
+    }
   }
   changed(x: number, y: number, z: number) {
     if (![x, y, z].every(Number.isInteger)) return;
     for (const [dx, dy, dz] of [[0, 0, 0], ...neighbors]) {
       const nx = x + dx, ny = y + dy, nz = z + dz;
-      // Persistable work only: a save can run before updates() discards a
-      // bedrock/out-of-world neighbor of an edit at the build limits.
+      // Keep unloaded-neighbor work deferred by chunk. It remains persisted,
+      // but cannot starve simulation updates in the currently resident area.
       if (ny > MIN_Y && ny <= MAX_Y && Math.abs(nx) <= 1e7 && Math.abs(nz) <= 1e7)
-        this.queue.add(blockKey(nx, ny, nz));
+        this.enqueueKey(blockKey(nx, ny, nz));
     }
   }
   furnace(key: string) {
@@ -227,12 +255,12 @@ export class Simulation {
     });
   }
   circuits(player?:Vec3) {
-    for(const [key,old] of this.specials) {
+    for(const key of this.specials.keys()) {
       const [x,y,z]=key.split(",").map(Number),v=this.world.get(x,y,z),id=idOf(v);
       if(id!==B.Timer && id!==B.Plate)continue;
       let on=false;
       if(id===B.Timer)on=!!(stateOf(v)&2) && Math.floor(this.elapsed/[.5,1,2,4][(stateOf(v)>>2)&3])%2===0;
-      else on=[...(player?[player]:[]),...this.occupants].some(p=>Math.abs(p.x-x-.5)<.8 && Math.abs(p.z-z-.5)<.8 && p.y>=y-.1 && p.y<=y+1.8);
+      else on=pressureTriggered(x,y,z,player,this.occupants,(px,pz)=>this.world.loaded(px,pz));
       const next=packed(id,(stateOf(v)&~1)|(on?1:0));
       if(next!==v)this.world.set(x,y,z,next);
       this.specials.set(key,next);
@@ -246,7 +274,10 @@ export class Simulation {
         queue.push([key, 15]);
       }
     }
-    for (let i = 0; i < queue.length && i < 4096; i++) {
+    // All active sources are seeded before traversal, so FIFO traversal is
+    // multi-source breadth-first propagation. Do not truncate at an arbitrary
+    // 4096 entries: large loaded circuits must still reach every connected wire.
+    for (let i = 0; i < queue.length; i++) {
       const [key, p] = queue[i];
       if (p <= 1) continue;
       const [x, y, z] = key.split(",").map(Number);
@@ -259,7 +290,7 @@ export class Simulation {
       }
     }
     this.power=power;
-    for (const [key, indexed] of this.specials) {
+    for (const key of this.specials.keys()) {
       const [bx, by, bz] = key.split(",").map(Number);
       const v = this.world.get(bx, by, bz),
         id = idOf(v);
@@ -277,7 +308,8 @@ export class Simulation {
       if (id === B.Wire) next = packed(id, power.get(key) ?? 0);
       if (id === B.Lamp) next = packed(id, p > 0 ? 1 : 0);
       if (id === B.Door) {
-        const otherY = y + (stateOf(v) & 8 ? -1 : 1),
+        const state = stateOf(v),
+          otherY = y + (state & 8 ? -1 : 1),
           other = this.world.get(x, otherY, z);
         if (idOf(other) === B.Door)
           for (const [dx, dy, dz] of neighbors) {
@@ -286,8 +318,16 @@ export class Simulation {
             if ([B.Wire,B.Switch,B.Timer,B.Plate].includes(nid as never)) connected = true;
             p = Math.max(p, power.get(k) ?? 0);
           }
-        if (connected)
-          next = packed(id, p > 0 ? stateOf(v) | 4 : stateOf(v) & ~4);
+        // Bit 4 is the visible open state; bit 16 marks circuit ownership.
+        // Manual doors without this marker are never changed by circuits.
+        const circuitOwned = !!(state & 16) ||
+          (idOf(other) === B.Door && !!(stateOf(other) & 16));
+        if (connected || circuitOwned) {
+          const nextState = (state & ~(4 | 16)) |
+            (connected ? 16 : 0) |
+            (connected && p > 0 ? 4 : 0);
+          next = packed(id, nextState);
+        }
       }
       if (next !== v) {
         this.world.set(x, y, z, next);
@@ -311,7 +351,7 @@ export class Simulation {
       if (movedInto.has(key)) { this.queue.add(key); continue; }
       const [x, y, z] = key.split(",").map(Number);
       if (y <= MIN_Y || y > MAX_Y) continue;
-      if(!this.world.loaded(x,z)) {this.queue.add(key);continue;}
+      if(!this.world.loaded(x,z)) {this.enqueueKey(key);continue;}
       const v = this.world.get(x, y, z),
         id = idOf(v),
         below = this.world.get(x, y - 1, z);
@@ -395,9 +435,16 @@ export class Simulation {
       elapsed:this.elapsed,
       tickNo:this.tickNo,
       cropTimer:this.cropTimer,
-      pendingTicks:[...this.queue],
+      pendingTicks:[...new Set([...this.queue, ...[...this.deferred.values()].flatMap((keys)=>[...keys])])],
       weather: this.weather,
       weatherTimer: this.weatherTimer,
     };
   }
+  dispose(){
+    this.automation.dispose();this.power.clear();this.occupants.length=0;
+    for(const key of Object.keys(this.furnaces))delete this.furnaces[key];
+    for(const key of Object.keys(this.brewers))delete this.brewers[key];
+    this.specials.clear();this.indexed.clear();this.queue.clear();this.deferred.clear();
+  }
+
 }

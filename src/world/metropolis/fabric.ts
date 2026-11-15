@@ -7,7 +7,7 @@ import type { RealizationPlan } from "../landmarks/types";
 import { footprintsOverlap, type Footprint, type Point } from "../geography/geometry";
 import { cityElevation, sampleTerrain } from "../geography/terrain";
 import { FAMILY, districtSpec, type DistrictId, type Archetype } from "./districts";
-import { nearestRoadPoint, roadBounds, roadElevation, type UrbanLot, type UrbanPlan, type UrbanRoad } from "./plan";
+import { nearestRoadPoint, roadBounds, type UrbanLot, type UrbanPlan, type UrbanRoad } from "./plan";
 import { INTENTIONAL_OPEN_SPACES, type DensityPlan } from "./density";
 import { designBuildings, type BuildingDesign } from "./variety";
 

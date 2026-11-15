@@ -127,7 +127,7 @@ describe("schema 1 atomic chunk delta saves", () => {
     await writeSave(d, w.captureChanges().chunks, revision);
     expect((await loadSave(d.id)).edits["1,25,1"]).toBe(B.Jade);
   });
-  it("rejects all legacy formats and generator versions without migration", () => {
+  it("rejects obsolete save formats and world-layout selectors", () => {
     const d = freshWorld("format", "a", "creative");
     expect(() => validateSave({ ...d, generator: 1 })).toThrow();
     expect(() => validateSave({ ...d, format: undefined })).toThrow();

@@ -65,10 +65,10 @@ it('discards a light job when a column unloads during staged sky diffing',()=>{
  let n=0;expect(()=>{while(l.pending && n++<100)l.update(0);}).not.toThrow();expect(l.signature).toBe(-1);
 });
 
-it('saves boundary edits immediately with pending simulation work in both generator versions',async()=>{
- for(const generator of [3,4]) {
-  const data={...freshWorld('boundary work','jade-harbor','creative'),generator};
-  const world=new World(data.seed,{},false,generator),sim=new Simulation(world);
+it('saves boundary edits immediately with pending simulation work in the active world layout',async()=>{
+ for(const seed of ['jade-harbor','different-city']) {
+  const data=freshWorld('boundary work',seed,'creative');
+  const world=new World(data.seed,{},false),sim=new Simulation(world);
   world.onChange=(x,y,z)=>sim.changed(x,y,z);
   for(const [x,y,z] of [[15,MIN_Y+1,16],[-16,MAX_Y,-16],[1e7,4,-1e7]]) world.set(x,y,z,B.Red);
   expect(sim.queue.has('15,-63,16')).toBe(true);

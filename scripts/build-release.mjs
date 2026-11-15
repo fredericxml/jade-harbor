@@ -1,4 +1,5 @@
 /** The only supported release build entrypoint. Never edit dist bundles manually. */
+import {buildPwa} from './build-pwa.mjs';
 import { spawnSync } from 'node:child_process';
 import { existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -14,15 +15,17 @@ const root=process.cwd();
 const tsc=join(root,'node_modules/typescript/bin/tsc');
 const vite=join(root,'node_modules/vite/bin/vite.js');
 for(const binary of [tsc,vite])if(!existsSync(binary)) {
-  console.error(`Missing ${binary}; run npm ci on a computer with npm registry access.`);
+  console.error(`Missing ${binary}; run npm ci before building.`);
   process.exit(1);
 }
 try {
   run(tsc,['--noEmit']);
+  run(join(root,'scripts/generate-app-icons.mjs'),[]);
   // Vite clears the old output by default. Remove it here too to make stale
-  // manually patched bundles impossible to ship after a failed build.
+  // manually modified bundles impossible to ship after a failed build.
   rmSync(join(root,'dist'), {recursive:true,force:true});
   run(vite,['build']);
+  const pwa=buildPwa(root);console.log('Generated PWA:',JSON.stringify({version:pwa.version,build:pwa.id,precacheFiles:pwa.files.length}));
   createReleaseManifest(root);
   const result=verifyReleaseManifest(root);
   console.log('Verified fresh build:',JSON.stringify(result));

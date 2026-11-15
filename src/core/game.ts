@@ -1,3 +1,8 @@
+import { createId } from "./ids";
+import { AppViewport } from "../browser/viewport";
+import { BrowserExperience } from "../browser/experience";
+import { BrowserLifecycle } from "../browser/lifecycle";
+import { TabCoordinator } from "../persistence/tab-coordination";
 import { PROFESSIONS } from "../game/professions";
 import { Discoveries } from "../game/city-life/discoveries";
 import { journalPlaces, travelDestinations, travelUnlocked, safeTravelArrival, travelColumns, type TravelDestination } from "../game/city-life/travel";
@@ -8,13 +13,18 @@ import { StatusEffects, POTIONS, EFFECTS, enchantLevel, enchantHeld, repairHeld 
 import { cloneStack, Enchantment } from "../game/stack";
 import { INFUSIONS, brewingWater } from "../game/brewing";
 import { toolStation, brewerPanel } from "../ui/stations";
-import * as THREE from "three";
 import { World } from "../world/world";
 import { View } from "../render/renderer";
-import {graphicsQuality,graphicsProfile,type GraphicsQuality} from "../render/graphics";
+import {graphicsQuality,graphicsProfile,GRAPHICS_PROFILES,type GraphicsQuality} from "../render/graphics";
+import { GraphicsPerformanceAdvisor } from "../render/performance-advisor";
+import { FramePacer, frameRateLimit, frameUrgent, hasFrameBackgroundWork, type FrameRateLimit } from "../render/frame-pacer";
+import { AdaptiveResolution } from "../render/adaptive-resolution";
+import { version as appVersion } from "../../package.json";
 import { UI, esc, icon, slot } from "../ui/ui";
 import type { Screen } from "../ui/ui";
 import { Input } from "../player/input";
+import {keyboardCommand, type InputCommand} from "../player/input-state";
+import {touchMode, touchSensitivity, type TouchMode} from "../ui/touch-controls";
 import {
   Body,
   moveBody,
@@ -50,7 +60,6 @@ import {
   deleteSave,
   exportSave,
   validateSave,
-  denseCityCopy,
 } from "../persistence/saves";
 import { MIN_Y, MAX_Y, clamp, Vec3, idOf, packed, stateOf, blockKey } from "./coords";
 import { biomeAt } from "../world/generator";
@@ -59,6 +68,13 @@ export class Game {
   ui: UI;
   view: View;
   input: Input;
+  viewport: AppViewport;
+  browser?: BrowserExperience;
+  lifecycle?: BrowserLifecycle;
+  tabs?: TabCoordinator;
+  saveConflicted=false;
+  private opening=false;
+  private reclaimTask?:Promise<void>;
   audio = new AudioEngine();
   world: World;
   inventory = Inventory.creative();
@@ -94,7 +110,11 @@ export class Game {
   saveAgain = false;
   saveActivityVersion = 0;
   achievements = new Set<string>();
-  settings = { graphicsQuality: "medium" as GraphicsQuality, fov: 75, sensitivity: 4, distance: 5, simulationDistance: 4, volume: 30 };
+  settings = { adaptiveResolution: false, frameRateLimit: "auto" as FrameRateLimit, graphicsQuality: "high" as GraphicsQuality, fov: 75, sensitivity: 4, distance: 5, simulationDistance: 4, volume: 30, touchControls: "auto" as TouchMode, touchSensitivity: 1 };
+  private adaptive = new AdaptiveResolution();
+  private performanceAdvisor = new GraphicsPerformanceAdvisor();
+  private performanceRecommendation: GraphicsQuality | null = null;
+  private performanceRecommendationFps = 0;
   hit: Hit | null = null;
   mineProgress = 0;
   mineKey = "";
@@ -107,7 +127,6 @@ export class Game {
   craftingGrid: (Stack | null)[] = Array(9).fill(null);
   category = "All";
   query = "";
-  lastJump = 0;
   crouching = false;
   jumpRequest = false;
   useRequest = false;
@@ -119,6 +138,13 @@ export class Game {
   damageCooldown = 0;
   hungerClock = 0;
   lastTime = 0;
+  private lastFrameWorkMs = 0;
+  private lastInputTime = 0;
+  private frameHandle:number|null=null;
+  private disposed=false;
+  private disposeTask?:Promise<void>;
+  private handleCanvasClick=()=>{if(this.active&&this.ui.screen==="none"&&!this.input.locked&&this.ui.pointerType!=="touch"&&this.ui.pointerType!=="pen")void this.input.lock();};
+  private framePacer = new FramePacer();
   accumulator = 0;
   simulation: Simulation;
   entities: Entities;
@@ -142,6 +168,7 @@ export class Game {
   constructor(root: HTMLElement) {
     this.ui = new UI(root);
     this.view = new View(root.querySelector("canvas")!);
+    this.viewport=new AppViewport(root,(w,h)=>this.view.resize(w,h));
     // UI and world now render the same generated pixel textures for every block.
     try {
       this.ui.root.style.setProperty("--item-atlas-url", `url("${this.view.atlas.canvas.toDataURL("image/png")}")`);
@@ -149,11 +176,14 @@ export class Game {
       // Privacy-restricted canvas exports can fail; colored icons stay usable.
     }
     this.input = new Input(this.view.canvas);
+    this.ui.bindTouchControls(this.input.touch, () => {
+      if (this.active && !this.dead && this.ui.screen === "none") void this.input.lock();
+    });
     this.world = new World("jade-harbor");
     this.simulation = new Simulation(this.world);
     this.entities = new Entities(this.world);
-    this.entityView = new EntityView(this.view.scene);
-    this.effects = new Effects(this.view.scene);
+    this.entityView = new EntityView(this.view.scene, this.view.renderAudit);
+    this.effects = new Effects(this.view.scene, this.view.renderAudit);
     this.lighting = new Lighting(this.world);
     this.view.lighting = this.lighting;
     try {
@@ -165,48 +195,41 @@ export class Game {
     this.applySettings();
     this.view.onContext=(lost)=>{
       if(lost) { if(this.active) this.pause(); this.ui.toast("Graphics paused. Your world is kept in memory while we save it."); }
-      else this.ui.toast("Graphics restored. Return to your world when ready.");
+      else {this.viewport.refresh();this.ui.toast("Graphics restored. Return to your world when ready.");}
     };
     this.bind();
     this.loadPreview();
     void this.refreshSaves();
-    requestAnimationFrame((t) => this.frame(t));
-    document.addEventListener("visibilitychange", () => {
-      if (document.hidden && this.active) {
-        void this.save();
-        if (this.ui.screen === "none") this.pause();
-      }
-    });
-    addEventListener("pagehide", () => {
-      if (this.active) void this.save();
-    });
+    this.tabs=new TabCoordinator(()=>this.markSaveConflict());
+    this.browser=new BrowserExperience({ui:this.ui,viewport:this.viewport,active:()=>this.active,save:()=>this.save(),pauseForUpdate:async()=>{this.input.clear();if(!this.active)return true;if(this.saveConflicted)return false;this.pause();return this.saveTask?await this.saveTask:await this.save();},help:()=>{this.returnScreen=this.ui.screen;this.ui.panel("browser","Jade Harbor on your device.","Install, play offline and choose your display.",this.browser!.helpHtml());}});
+    this.lifecycle=new BrowserLifecycle({suspend:()=>this.suspendBrowser(),restore:()=>{this.input.restoreUIFocus();this.lastTime=0;this.lastFrameWorkMs=0;this.accumulator=0;this.viewport.refresh();this.browser?.restore();},release:()=>{void this.tabs?.release();}});
+    // Start the frame loop only after every synchronous subsystem has been
+    // constructed. A startup failure must not leave a half-built game ticking.
+    this.scheduleFrame();
   }
+  private scheduleFrame(){if(this.disposed||this.frameHandle!==null)return;this.frameHandle=requestAnimationFrame(t=>{this.frameHandle=null;if(!this.disposed)this.frame(t);});}
   bind() {
-    this.view.canvas.addEventListener("click", () => {
-      if (this.active && this.ui.screen === "none" && !this.input.locked)
-        void this.input.lock();
-    });
+    this.view.canvas.addEventListener("click",this.handleCanvasClick);
     this.input.onLook = (dx, dy) => {
-      this.yaw -= dx * 0.0005 * this.settings.sensitivity;
+      this.yaw -= dx;
       this.pitch = clamp(
-        this.pitch - dy * 0.0005 * this.settings.sensitivity,
+        this.pitch - dy,
         -1.54,
         1.54,
       );
     };
-    this.input.onUse = () => {
-      if (this.active && this.ui.screen === "none") this.useRequest=true;
-    };
     this.input.onUnlock = () => {
-      this.useRequest=false;
+      this.useRequest=this.jumpRequest=false;
       if (this.active && this.ui.screen === "none") this.pause();
     };
-    this.input.onWheel = (n) => {
-      if (!this.active || this.ui.screen !== "none") return;
-      this.inventory.selected = (this.inventory.selected + n + 9) % 9;
-      this.scheduleSave();
+    this.input.onCommand = command => this.command(command);
+    this.input.onClear = () => {this.useRequest=this.jumpRequest=false;this.mineProgress=0;this.ui.touchControls?.suspend();};
+    this.ui.onScreenChange = screen => {
+      this.input.setContext(this.active && !this.dead && screen==="none"?"gameplay":"ui");
+      if (screen !== "none") this.performanceAdvisor.suspend();
+      this.useRequest=this.jumpRequest=false;this.mineProgress=0;
     };
-    this.input.onKey = (key) => this.key(key);
+    this.input.setContext(this.ui.screen==="none"?"gameplay":"ui");
     this.ui.onMove = (fromAction, fromIndex, toAction, toIndex) => {
       if (!this.active || (this.ui.screen !== "inventory" && this.ui.screen !== "chest")) return;
       const valid = (action: string) => action === "slot" ||
@@ -224,6 +247,23 @@ export class Game {
       void this.action(a, b, e).catch((err) =>
         this.ui.toast(err instanceof Error ? err.message : "Action failed."),
       );
+    };
+    this.ui.onPerformanceAction = action => {
+      if (action === "lower" && this.performanceRecommendation) {
+        const next = this.performanceRecommendation;
+        this.performanceRecommendation = null;
+        this.performanceRecommendationFps = 0;
+        this.performanceAdvisor.accept(performance.now());
+        this.settings.graphicsQuality = next;
+        this.applySettings();
+        this.ui.hidePerformanceAdvisor();
+        this.ui.toast(`Graphics quality changed to ${GRAPHICS_PROFILES[next].label}.`);
+      } else {
+        this.performanceAdvisor.dismiss();
+        this.performanceRecommendation = null;
+        this.performanceRecommendationFps = 0;
+        this.ui.hidePerformanceAdvisor();
+      }
     };
     this.ui.onSearch = () => {
       this.query = (
@@ -253,13 +293,31 @@ export class Game {
         }
         this.body.fallStart = this.body.position.y;
         this.view.hand.visible = this.mode !== "spectator";
-        this.ui.pause(this.meta.name, this.mode, this.hardcoreEnded);
+        this.ui.pause(this.meta.name, this.mode, this.hardcoreEnded, (this.performanceRecommendation
+          ? { current: this.settings.graphicsQuality, next: this.performanceRecommendation, fps: this.performanceRecommendationFps }
+          : undefined));
         void this.save();
         return;
       }
       if(el.id === "graphicsQuality") {
-        this.settings.graphicsQuality=graphicsQuality(el.value);
+        const next = graphicsQuality(el.value);
+        if (next !== this.settings.graphicsQuality) {
+          this.performanceAdvisor.reset(performance.now());
+          this.performanceRecommendation = null;
+          this.performanceRecommendationFps = 0;
+          this.ui.hidePerformanceAdvisor();
+        }
+        this.settings.graphicsQuality=next;
         this.applySettings();return;
+      }
+      if(el.id === "adaptiveResolution") {
+        this.settings.adaptiveResolution=el.value==="on";this.applySettings();return;
+      }
+      if(el.id === "frameRateLimit") {
+        this.settings.frameRateLimit=frameRateLimit(el.value==="auto"?"auto":Number(el.value));this.applySettings();return;
+      }
+      if (el.id === "touchControls") {
+        this.settings.touchControls = touchMode(el.value); this.applySettings(); return;
       }
       if (el.id in this.settings) {
         (this.settings as unknown as Record<string, number>)[el.id] = Number(
@@ -268,8 +326,9 @@ export class Game {
         this.applySettings();
         const output = el.parentElement?.querySelector("output");
         if (output)
-          output.textContent = el.value +
+          output.textContent = (el.id === "touchSensitivity" ? this.settings.touchSensitivity.toFixed(1) : el.value) +
             (el.id === "fov" ? "°" : el.id === "volume" ? "%" :
+             el.id === "touchSensitivity" ? "×" :
              el.id === "distance" || el.id === "simulationDistance" ? " chunks" : "");
       }
     };
@@ -283,8 +342,17 @@ export class Game {
     this.settings.distance = Math.round(clamp(finite(this.settings.distance, 5), 3, 8));
     this.settings.simulationDistance = Math.round(clamp(finite(this.settings.simulationDistance, 4), 2, 6));
     this.settings.sensitivity = clamp(finite(this.settings.sensitivity, 4), 1, 12);
+    if(this.input)this.input.mouseSensitivity=this.settings.sensitivity;
     this.settings.volume = clamp(finite(this.settings.volume, 30), 0, 100);
     this.settings.graphicsQuality=graphicsQuality(this.settings.graphicsQuality);
+    this.settings.adaptiveResolution=this.settings.adaptiveResolution===true;
+    this.settings.frameRateLimit=frameRateLimit(this.settings.frameRateLimit);
+    this.adaptive.configure(this.settings.adaptiveResolution,this.settings.frameRateLimit);
+    this.view.setGpuTimingEnabled?.(this.settings.adaptiveResolution||this.debug);
+    this.view.setResolutionScale(this.adaptive.scale);
+    this.settings.touchControls = touchMode(this.settings.touchControls);
+    this.settings.touchSensitivity = touchSensitivity(this.settings.touchSensitivity);
+    this.ui?.touchControls?.configure(this.settings.touchControls, this.settings.touchSensitivity);
     const profile=graphicsProfile(this.settings.graphicsQuality);
     this.view.setGraphicsProfile(profile);
     this.effects.setRainCount(profile.rainParticleCount);
@@ -292,12 +360,17 @@ export class Game {
     this.view.camera.updateProjectionMatrix();
     this.view.distance = this.settings.distance;
     this.audio.volume = this.settings.volume / 100;
+    this.browser?.refresh();
     try {
       localStorage.setItem(
         "jade-harbor-settings",
         JSON.stringify(this.settings),
       );
     } catch {}
+  }
+  performanceReport() {
+    const v=this.view;
+    return {schema:1,version:appVersion,graphics:{quality:this.settings.graphicsQuality,adaptive:this.settings.adaptiveResolution,scale:v.resolutionScale,frameRateLimit:this.settings.frameRateLimit,frameTargetFps:this.framePacer.targetFps,gpuTimingEnabled:this.settings.adaptiveResolution||this.debug,adaptiveState:this.adaptive.state,adaptiveBottleneck:this.adaptive.bottleneck,adaptiveSampleCount:this.adaptive.sampleCount,decision:this.adaptive.decision,drawingBuffer:{width:v.canvas.width,height:v.canvas.height,ratio:v.renderer.getPixelRatio()}},capabilities:v.capabilities,metrics:v.metrics.snapshot(),subsystems:{cityLife:this.entities.life?{scheduleMs:this.entities.life.metrics.scheduleMs,eventMs:this.entities.life.metrics.eventMs,active:this.entities.life.metrics.active,mid:this.entities.life.metrics.mid,far:this.entities.life.metrics.far,relocations:this.entities.life.metrics.relocations,fallbacks:this.entities.life.metrics.fallbacks}:null,navigation:{solveMs:this.entities.navigation.solveMs,expandedNodes:this.entities.navigation.expandedLastTick,searchesStarted:this.entities.navigation.searchesStarted},entities:{tickMs:this.entities.tickMs}},resources:{geometries:v.renderer.info.memory.geometries,textures:v.renderer.info.memory.textures,programs:v.renderer.info.programs?.length??null,columns:this.world.chunks.size,meshQueue:this.world.dirty.size,worldStreaming:this.world.streamingDiagnostics,meshQueueDiagnostics:{...v.meshQueueStats},loadedDataSections:[...this.world.chunks.values()].reduce((n,c)=>n+c.blocks.sections.size,0),untrackedRenderables:v.renderAuditUntrackedSnapshot(),generating:this.world.pending.size,residents:this.entities.residentPopulation.length,activeResidents:this.entities.life?.active.size??null,viewmodelRender:v.viewmodelRenderStats,distant:v.distant?{planMs:v.distant.stats.planMs,buildMs:v.distant.stats.buildMs,maxBuildSliceMs:v.distant.stats.maxBuildSliceMs,ready:v.distant.stats.ready,terrainReady:v.distant.stats.terrainReady,anchorsReady:v.distant.stats.anchorsReady,terrainTriangles:v.distant.stats.terrainTriangles,waterTriangles:v.distant.stats.waterTriangles,anchorTriangles:v.distant.stats.anchorTriangles,anchorBoxes:v.distant.stats.anchorBoxes}:null,render:{...v.worldRenderStats}},notes:"Local rolling samples (up to 240 each). CPU subsystem samples are separate categories and may be nested/overlap; do not sum them. worldStream measures request/eviction bookkeeping; meshQueue includes dirty-queue scan plus mesh creation; mesh is per-section creation. simulation and entities are subcomponents of tick. actorRender includes resident/encounter/drop scene updates. renderSubmit is CPU-side submission, not GPU execution. GPU render time is asynchronous EXT_disjoint_timer_query_webgl2 data when supported; disjoint results are discarded. Browser frame intervals include scheduling. F3 A/B windows compare frameWork and renderSubmit samples with diagnostics enabled versus disabled; compare only in the same settled scene and do not treat them as a controlled GPU benchmark. Mesh-queue queueAgeMs is the duration of the current non-empty backlog episode, not the age of the oldest individual key. Mesh-queue admissionBacklog is the unconsumed dirty-add journal; queuedCandidates and activeSections are the persistent mesh scheduling lanes, while activeJobs and pendingCommits are subsets of activeSections. sectionCoordinateCache and candidatePoolCapacity are retained object counts, not RAM byte measurements. admissionHeadroomMs is estimated from the target frame interval minus the previous measured frameWork CPU time; it is not GPU headroom. Untracked renderables are visible scene objects missing a render-audit category and are not proof of submitted draws. Hardware hints do not measure device speed or temperature. No world names, IDs, seeds or player data included."};
   }
   loadPreview() {
     for (let z = -2; z <= 2; z++)
@@ -317,31 +390,42 @@ export class Game {
       );
     }
   }
-  async start(
+  async start(data?:SaveData,name="My Jade Harbor",seed="jade-harbor",mode:Mode="creative") {
+    if(this.opening)throw new Error("A world is already opening. Please wait.");this.opening=true;
+    try {const prepared=data?validateSave(data):freshWorld(name,seed,mode);
+      if(this.active&&!this.saveConflicted){this.pause();if(!(await(this.saveTask??this.save())))throw new Error("Save the current world before opening another.");}
+      if(this.tabs&&!(await this.tabs.acquire(prepared.id,prepared.revision??0)))throw new Error("This world is open in another tab. Close it there, then try again.");
+      this.saveConflicted=false;await this.startOwnedWorld(prepared,name,seed,mode);
+      if(this.tabs&&!this.tabs.writable(this.meta.id))this.markSaveConflict();
+    }finally{this.opening=false;}
+  }
+  private async startOwnedWorld(
     data?: SaveData,
     name = "My Jade Harbor",
     seed = "jade-harbor",
     mode: Mode = "creative",
   ) {
+    this.input.clear();
     if(this.travelState)this.cancelTravel(false);
     this.travelSerial++; this.travelState = undefined;
-    if (this.active && !(await this.save()))
-      throw new Error("Save the current world before opening another.");
     clearTimeout(this.saveTimer);
-    data = data ? validateSave(data) : freshWorld(name, seed, mode);
+    data = data ?? freshWorld(name, seed, mode);
     this.saveRevision = data.revision ?? 0;
     this.discoveries?.dispose();
+    this.simulation.dispose();
     this.entities.dispose();
+    this.lighting.dispose();
     this.world.dispose();
     this.view.clear();
+    this.effects.clear();
     this.mode = data?.mode ?? mode;
     this.meta = {
-      id: data?.id ?? crypto.randomUUID(),
+      id: data?.id ?? createId(),
       name: data?.name ?? name,
       seed: data?.seed ?? seed,
       created: data?.created ?? Date.now(),
     };
-    this.world = new World(this.meta.seed, data.edits, true, data.generator);
+    this.world = new World(this.meta.seed, data.edits, true);
     this.simulation = new Simulation(this.world, data?.simulation);
     this.entities = new Entities(this.world, data?.simulation, data.time);
     this.entityView.clear();
@@ -406,6 +490,9 @@ export class Game {
       this.evictionSave=true;
       void this.save().finally(()=>{window.setTimeout(()=>this.evictionSave=false,2000);});
     };
+    this.performanceAdvisor.reset(performance.now());
+    this.performanceRecommendation = null;
+    this.performanceRecommendationFps = 0;
     this.active = true;
     this.tickCount = 0;
     this.cooldown =
@@ -476,7 +563,6 @@ export class Game {
   snapshot(includeEdits = true): SaveData {
     return {
       version: 1,
-      generator: this.world.generatorVersion,
       format: "jade-harbor-engine",
       revision: this.saveRevision,
       ...this.meta,
@@ -516,6 +602,7 @@ export class Game {
     };
   }
   scheduleSave() {
+    if(this.saveConflicted)return;
     // Increment even when the write is already in flight. A save may have
     // snapshotted older state, so its status must not claim newer changes.
     this.saveActivityVersion++;
@@ -523,7 +610,7 @@ export class Game {
     this.saveTimer = window.setTimeout(() => void this.save(), 650);
   }
   async save(): Promise<boolean> {
-    if (!this.active) return false;
+    if (!this.active || this.saveConflicted || this.tabs && !this.tabs.writable(this.meta.id)) return false;
     // Manual saves, autosaves and eviction requests share a single writer.
     // A burst of 100 requests produces at most one extra pending write,
     // rather than 100 stale snapshots queued for IndexedDB.
@@ -548,6 +635,8 @@ export class Game {
         world.acknowledgeChanges(captured.revisions);
         this.view.metrics.add("save", performance.now() - started);
         this.saveRevision = revision;
+        if(this.saveConflicted)return false;
+        this.tabs?.committed(revision);
         this.ui.saveStatus(
           world.dirtyEdits.size || this.saveActivityVersion !== activityVersion
             ? "Saved · newer changes pending"
@@ -555,6 +644,7 @@ export class Game {
         );
         return true;
       } catch (error) {
+        if(error instanceof Error&&error.name==="SaveConflictError"){this.markSaveConflict();return false;}
         this.ui.saveStatus("Save failed · changes still in memory");
         this.ui.toast(
           error instanceof Error
@@ -578,7 +668,7 @@ export class Game {
     } finally {
       this.saveTask = null;
       // A request arriving just as the task resolves must never get lost.
-      if (this.saveAgain && this.active) void this.save();
+      if (this.saveAgain && this.active && !this.saveConflicted) void this.save();
     }
   }
   showJournal() {
@@ -603,7 +693,7 @@ export class Game {
     if(!this.inventory.settleCursor()){this.ui.toast("Make room for the stack you are holding.");return false;}
     const began=performance.now(),travelMode=this.mode;
     const world=this.world,serial=++this.travelSerial,origin={...this.body.position},camera=this.view.camera.position.clone();
-    this.input.keys.clear();this.input.left=this.input.right=false;
+    this.input.clear();
     document.exitPointerLock?.();
     this.travelState={destination,world,serial,origin,camera};
     this.ui.panel("journal","Traveling…",destination.title,'<p role="status">Preparing a safe arrival…</p><button data-action="travel-cancel">Cancel travel</button>');
@@ -620,7 +710,7 @@ export class Game {
     };
     try {
       // Save once before eviction. Collision preparation owns only a tiny
-      // footprint; district meshes, lighting and NPC settling are Stage B.
+      // footprint; district meshes, lighting and NPC settling complete independently.
       if(!(await bounded(this.save())))throw Error("Save your world before traveling.");
       check();let arrival:Vec3|undefined;
       for(const anchor of [destination.arrival,...(destination.fallback?[destination.fallback]:[])]) {
@@ -645,7 +735,8 @@ export class Game {
       this.view.camera.rotation.set(this.pitch,this.yaw,0,"YXZ");this.accumulator=0;
       this.hit=null;this.entityHit=null;this.mineProgress=0;this.mineKey="";this.crouching=false;
       this.entities.life?.reactivate();this.entities.navigation.agents.clear();
-      this.entities.life?.prepare(this.entities.list,arrival,this.time,this.simulation.weather==="rain",this.entities.elapsed,this.entities.navigation);
+      this.entities.life?.prepare(this.entities.residentPopulation,arrival,this.time,this.simulation.weather==="rain",this.entities.elapsed,this.entities.navigation);
+      this.entities.refreshOccupants();
       committed=true;this.travelState=undefined;this.resume(false);this.scheduleSave();
       this.ui.toast(`Arrived: ${destination.title}`);return true;
     }catch(error){
@@ -658,12 +749,48 @@ export class Game {
       if(this.travelState?.serial===serial)this.travelState=undefined;
     }
   }
+  private async suspendBrowser(){this.input.clear();if(this.travelState)this.cancelTravel(false);if(!this.active||this.saveConflicted)return false;if(this.dead){this.input.unlock();return this.save();}this.pause();return this.saveTask?this.saveTask:false;}
+  private markSaveConflict(){if(!this.active||this.saveConflicted)return;this.saveConflicted=true;this.saveAgain=false;clearTimeout(this.saveTimer);if(this.travelState)this.cancelTravel(false);this.tabs?.markConflict();this.showSaveConflict();this.input.unlock();this.ui.saveStatus("Save conflict · Export a backup");}
+  private showSaveConflict(){this.ui.panel("conflict","This world changed in another tab.","Your current session is paused to protect your changes.",'<p>Export the current session before leaving if you want to keep its changes. The newer saved world will not be overwritten or merged.</p><div class="pause-grid"><button class="primary" data-action="conflict-export">Export current session backup</button><button data-action="conflict-reopen">Reopen latest saved version</button><button data-action="conflict-menu">Return to world list</button></div>');}
+  private reclaimSession(){if(this.reclaimTask)return;this.reclaimTask=(async()=>{if(!this.tabs||!(await this.tabs.acquire(this.meta.id,this.saveRevision))){this.ui.toast("This world is open in another tab. Close it there before resuming.");return;}const latest=await loadSave(this.meta.id);if((latest.revision??0)!==this.saveRevision){this.markSaveConflict();return;}this.resume(false);})().catch(e=>this.ui.toast(e instanceof Error?e.message:"Could not reopen this world.")).finally(()=>{this.reclaimTask=undefined;});}
+  disposeBrowser(){this.lifecycle?.dispose();this.browser?.dispose();this.viewport.dispose();void this.tabs?.dispose();this.input.dispose();}
+  /** Stop the game permanently and release every owned browser/GPU resource.
+   * Call this only for a real application teardown, never for bfcache suspension. */
+  dispose():Promise<void>{
+    if(this.disposeTask)return this.disposeTask;
+    this.disposed=true;
+    this.disposeTask=this.disposeResources();
+    return this.disposeTask;
+  }
+  private async disposeResources(){
+    if(this.frameHandle!==null){cancelAnimationFrame(this.frameHandle);this.frameHandle=null;}
+    clearTimeout(this.saveTimer);
+    this.input.clear();
+    if(this.active&&!this.saveConflicted){try{await(this.saveTask??this.save());}catch{/* Preserve teardown even if storage is unavailable. */}}
+    this.lifecycle?.dispose();this.lifecycle=undefined;
+    this.browser?.dispose();this.browser=undefined;
+    this.viewport.dispose();
+    this.view.canvas.removeEventListener("click",this.handleCanvasClick);
+    this.input.dispose();
+    this.ui.dispose();
+    this.discoveries?.dispose();this.discoveries=undefined;
+    this.simulation.dispose();this.entities.dispose();this.lighting.dispose();this.world.dispose();
+    this.entityView.dispose();this.effects.dispose();this.view.dispose();
+    for(const key of Object.keys(this.containers))delete this.containers[key];
+    await this.audio.dispose();
+    await this.tabs?.dispose();this.tabs=undefined;
+  }
   resume(relock = true) {
+    if(this.saveConflicted){this.showSaveConflict();return;}
+    if(this.active&&this.tabs&&!this.tabs.writable(this.meta.id)){this.reclaimSession();return;}
     if (this.travelState) return;
     if (!this.active) {
       this.ui.menu(this.saves);
       return;
     }
+    if(document.hidden){this.ui.pause(this.meta.name,this.mode,this.hardcoreEnded,(this.performanceRecommendation
+          ? { current: this.settings.graphicsQuality, next: this.performanceRecommendation, fps: this.performanceRecommendationFps }
+          : undefined));this.input.setContext("ui");return;}
     if (this.dead) {
       this.showDeath();
       return;
@@ -673,23 +800,36 @@ export class Game {
       return;
     }
     this.ui.show("none");
+    this.performanceAdvisor.resume(performance.now());
+    if (this.performanceRecommendation) {
+      this.ui.showPerformanceAdvisor(this.settings.graphicsQuality, this.performanceRecommendation, this.performanceRecommendationFps);
+    }
+    this.frameCount = 0;
+    this.fps = 0;
+    this.fpsTime = performance.now();
     this.input.prepareResume();
+    this.ui.touchControls?.setGameplay(this.input.state.context === "gameplay", this.mode);
     // Browser Escape deliberately releases Pointer Lock. Asking for a new
     // lock inside the same Escape can trigger another native release and
     // reopen Pause. A canvas click will reacquire the mouse safely.
-    if (relock) void this.input.lock();
-    else this.ui.toast("Click the game to capture your mouse.");
+    const mouse = this.ui.pointerType !== "touch" && this.ui.pointerType !== "pen";
+    if (relock && mouse) void this.input.lock();
+    else if (mouse && !this.ui.touchControls?.enabled) this.ui.toast("Click the game to capture your mouse.");
   }
   // Settings and Controls return to where they were opened, not always to gameplay.
   backToPreviousScreen() {
     if (!this.active || this.returnScreen === "menu") this.ui.menu(this.saves);
     else if (this.returnScreen === "create") this.ui.create();
-    else this.ui.pause(this.meta.name, this.mode, this.hardcoreEnded);
+    else this.ui.pause(this.meta.name, this.mode, this.hardcoreEnded, (this.performanceRecommendation
+          ? { current: this.settings.graphicsQuality, next: this.performanceRecommendation, fps: this.performanceRecommendationFps }
+          : undefined));
   }
   pause() {
     if (!this.active || this.dead) return;
     // Update the UI before releasing pointer lock to avoid an unlock-event race.
-    this.ui.pause(this.meta.name, this.mode, this.hardcoreEnded);
+    this.ui.pause(this.meta.name, this.mode, this.hardcoreEnded, (this.performanceRecommendation
+          ? { current: this.settings.graphicsQuality, next: this.performanceRecommendation, fps: this.performanceRecommendationFps }
+          : undefined));
     this.input.unlock();
     void this.save();
   }
@@ -704,31 +844,40 @@ export class Game {
       );
     if (screen === "craft") this.showCraft();
   }
-  key(code: string) {
+  // Retained only for older developer fixtures; physical adapters use commands.
+  key(code: string) {const command=keyboardCommand(code);if(command)this.command(command);}
+  command(command: Readonly<InputCommand>) {
+    if(this.saveConflicted){this.showSaveConflict();return;}
+    const {action, value}=command;
     if (this.travelState) {
-      if (code === "Escape") this.cancelTravel();
+      if (action === "pause") this.cancelTravel();
       return;
     }
-    if (/^Digit[1-9]$/.test(code) && this.active &&
+    if (action === "hotbarSelect" && this.active &&
         (this.ui.screen === "none" || this.ui.screen === "inventory")) {
-      this.inventory.selected = Number(code.slice(-1)) - 1;
+      this.inventory.selected = value;
       if (this.active && this.ui.screen === "inventory")
         this.ui.inventory(this.inventory, this.mode === "creative", this.category, this.query);
       if (this.active) this.scheduleSave();
       return;
     }
-    if (code === "F3") {
+    if(action==="hotbarDelta") {
+      if(this.active&&this.ui.screen==="none") {this.inventory.selected=(this.inventory.selected+Math.sign(value)+9)%9;this.scheduleSave();}return;
+    }
+    if (action === "debug") {
       this.debug = !this.debug;
+      this.view.setGpuTimingEnabled?.(this.debug||this.settings.adaptiveResolution);
+      this.view.setRenderAuditEnabled(this.debug);
       return;
     }
-    if (code === "Escape") {
+    if (action === "pause") {
       if (!this.active) {
         if (this.ui.screen !== "menu") this.ui.menu(this.saves);
       } else if (this.dead) {
         this.showDeath();
       } else if (this.ui.screen === "none") {
         this.pause();
-      } else if (this.ui.screen === "settings" || this.ui.screen === "controls" || this.ui.screen === "journal") {
+      } else if (this.ui.screen === "settings" || this.ui.screen === "controls" || this.ui.screen === "journal" || this.ui.screen === "browser") {
         this.backToPreviousScreen();
       } else {
         // Escape closes the modal; a fresh click reacquires browser pointer lock.
@@ -737,28 +886,24 @@ export class Game {
       return;
     }
     if (!this.active) return;
-    if (code === "KeyE") {
+    if (action === "inventory") {
       if (this.ui.screen === "inventory" || this.ui.screen === "craft")
         this.resume();
       else if (this.ui.screen === "none") this.open("inventory");
       return;
     }
     if (this.ui.screen !== "none") return;
-    if (code === "Space") {
+    if (action === "jump") {
       this.jumpRequest = true;
-      const now = performance.now();
-      if (now - this.lastJump < 280 && this.mode === "creative") {
-        this.body.flying = !this.body.flying;
-        this.scheduleSave();
-      }
-      this.lastJump = now;
+
     }
-    if (code === "KeyG" && this.mode === "creative") {
+    if (action === "toggleFlight" && this.mode === "creative") {
       this.body.flying = !this.body.flying;
+      this.ui.touchControls?.setFlightState(this.body.flying);
       this.scheduleSave();
     }
-    if (code === "KeyF") this.useRequest = true;
-    if (code === "KeyQ" && this.inventory.held && this.mode !== "spectator") {
+    if (action === "use") this.useRequest = true;
+    if (action === "drop" && this.inventory.held && this.mode !== "spectator") {
       const d = this.direction(),
         p = this.body.position;
       if (
@@ -776,6 +921,10 @@ export class Game {
   }
   async action(action: string, button: HTMLElement, event: MouseEvent) {
     this.audio.play("click");
+    if(action==="conflict-export"){exportSave(this.snapshot());return;}
+    if(action==="conflict-menu"){if(!confirm("Return to saved worlds? Export a backup first to keep changes from this session."))return;clearTimeout(this.saveTimer);this.active=false;this.saveConflicted=false;await this.tabs?.release();this.input.unlock();this.view.clearDistant();await this.refreshSaves();return;}
+    if(action==="conflict-reopen"){if(confirm("Reopen the latest saved version? Export your current session first to keep its changes.")){this.browser?.beginGameplayDisplay();await this.start(await loadSave(this.meta.id));}return;}
+    if(this.saveConflicted)return;
     const id = button.dataset.id;
     if(this.travelState){if(action==="back"||action==="travel-cancel")this.cancelTravel();return;}
     if (action === "new") {
@@ -783,6 +932,7 @@ export class Game {
       return;
     }
     if (action === "create") {
+      this.browser?.beginGameplayDisplay();
       const name =
           (
             document.querySelector("#world-name") as HTMLInputElement
@@ -790,13 +940,14 @@ export class Game {
         seed =
           (
             document.querySelector("#world-seed") as HTMLInputElement
-          ).value.trim() || crypto.randomUUID().slice(0, 8),
+          ).value.trim() || createId().slice(0, 8),
         mode = (document.querySelector("#world-mode") as HTMLSelectElement)
           .value as Mode;
       await this.start(undefined, name, seed, mode);
       return;
     }
     if (action === "load") {
+      this.browser?.beginGameplayDisplay();
       const save = this.saves.find((s) => s.id === id);
       if (save) await this.start(await loadSave(save.id));
       return;
@@ -809,6 +960,7 @@ export class Game {
         }
         if (!(await this.save())) return;
         this.active = false;
+        await this.tabs?.release();
         this.view.clearDistant();this.view.atmosphere.reset(.23,false,this.view.distance);
         this.input.unlock();
       }
@@ -823,7 +975,7 @@ export class Game {
       if (save) {
         const name = prompt("World name", save.name);
         if (name?.trim()) {
-          await renameSave(save.id, name);
+          await (this.tabs?this.tabs.protect(save.id,()=>renameSave(save.id,name)):renameSave(save.id,name));
           await this.refreshSaves();
         }
       }
@@ -839,7 +991,7 @@ export class Game {
       ) {
         this.ui.worldProcessing(s.id, "Deleting world…");
         try {
-          await deleteSave(s.id);
+          await (this.tabs?this.tabs.protect(s.id,()=>deleteSave(s.id)):deleteSave(s.id));
           await this.refreshSaves();
         } catch (error) {
           this.ui.worldProcessing(s.id, null);
@@ -856,21 +1008,9 @@ export class Game {
           `Reset “${s.name}” to its original seed? This erases its buildings, inventory and progress.`,
         )
       ) {
-        await resetSave(s.id);
+        await (this.tabs?this.tabs.protect(s.id,()=>resetSave(s.id)):resetSave(s.id));
         await this.refreshSaves();
         this.ui.toast("World reset. The city and Panda Plaza are ready again.");
-      }
-      return;
-    }
-    if (action === "dense-city-copy") {
-      const s = this.saves.find(s => s.id === id);
-      if (s) {
-        this.ui.worldProcessing(s.id, "Creating updated city copy…");
-        try {
-          await writeSave(denseCityCopy(await loadSave(s.id),10));
-          await this.refreshSaves();
-          this.ui.toast("Updated city copy created. Start at Panda Plaza with your saved progress.");
-        } catch (error) { this.ui.worldProcessing(s.id, null); throw error; }
       }
       return;
     }
@@ -880,7 +1020,7 @@ export class Game {
         this.ui.worldProcessing(s.id, "Duplicating world…");
         try {
           const d = await loadSave(s.id);
-          d.id = crypto.randomUUID();
+          d.id = createId();
           d.name = `${d.name} (copy)`;
           d.updated = Date.now();
           await writeSave(d);
@@ -908,7 +1048,7 @@ export class Game {
           if (file.size > 32 * 1024 * 1024)
             throw new Error("Save exceeds 32 MB.");
           const data = validateSave(JSON.parse(await file.text()));
-          data.id = crypto.randomUUID();
+          data.id = createId();
           data.updated = Date.now();
           await writeSave(data);
           await this.refreshSaves();
@@ -960,18 +1100,30 @@ export class Game {
       return;
     }
     if (action === "fullscreen") {
-      if (document.fullscreenElement) await document.exitFullscreen();
-      else await document.documentElement.requestFullscreen();
+      await this.browser?.display.toggleFullscreen();
       return;
     }
+    if (action === "export-performance") {
+      const url=URL.createObjectURL(new Blob([JSON.stringify(this.performanceReport(),null,2)],{type:"application/json"}));
+      const a=document.createElement("a");a.href=url;a.download="jade-harbor-performance.json";a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);return;
+    }
     if (action === "reset-settings") {
+      this.browser?.resetPreferences();
+      this.performanceAdvisor.reset(performance.now());
+      this.performanceRecommendation = null;
+      this.performanceRecommendationFps = 0;
+      this.ui.hidePerformanceAdvisor();
       this.settings = {
-        graphicsQuality: "medium",
+        graphicsQuality: "high",
+        adaptiveResolution: false,
+        frameRateLimit: "auto",
         fov: 75,
         sensitivity: 4,
         distance: 5,
         simulationDistance: 4,
         volume: 30,
+        touchControls: "auto",
+        touchSensitivity: 1,
       };
       this.applySettings();
       this.ui.settings(this.settings);
@@ -1106,16 +1258,16 @@ export class Game {
       return;
     }
     if (action === "trade") {
-      const offer = TRADES[Number(id)];
+      const offer = TRADES[Number(id)], trader = this.tradeEntity;
       if (
-        this.tradeEntity &&
-        this.tradeEntity.trades < 12 &&
-        Math.hypot(this.body.position.x-this.tradeEntity.body.position.x,this.body.position.y-this.tradeEntity.body.position.y,this.body.position.z-this.tradeEntity.body.position.z)<5 &&
-        offersFor(this.tradeEntity).some(o=>o.id===Number(id)) &&
+        trader &&
+        this.entities.canInteractWith(trader,this.body.position,5) &&
+        trader.trades < 12 &&
+        offersFor(trader).some(o=>o.id===Number(id)) &&
         offer &&
         this.inventory.transaction(offer.cost, offer.output)
       ) {
-        this.tradeEntity.trades++;
+        trader.trades++;
         this.audio.play("craft");
         this.unlockAchievement(
           "A fair exchange",
@@ -1124,7 +1276,7 @@ export class Game {
         this.scheduleSave();
       } else
         this.ui.toast(
-          "Check your items, inventory space, and daily trade limit.",
+          "The resident may no longer be available, or the trade requirements are not met.",
         );
       this.showTrade();
       return;
@@ -1227,7 +1379,7 @@ export class Game {
     const hit = this.target(),
       held = this.inventory.held,
       def = held ? item(held.id) : undefined,
-      skip = this.input.keys.has("ControlLeft") || this.input.keys.has("KeyC");
+      skip = this.input.held("crouch");
     const entity = this.entities.target(
       {
         x: this.body.position.x,
@@ -1415,7 +1567,7 @@ export class Game {
       this.mode === "adventure" ||
       this.mode === "spectator" ||
       !this.hit ||
-      !this.input.left
+      !this.input.held("primary")
     ) {
       this.mineProgress = 0;
       return;
@@ -1452,7 +1604,8 @@ export class Game {
     if(!this.breakContents(hit.x,hit.y,hit.z,loot)) {
       this.ui.toast("Nearby item storage is full. Collect some dropped items first.");return;
     }
-    this.world.set(hit.x, hit.y, hit.z, 0);
+    if(!this.world.set(hit.x, hit.y, hit.z, 0)) return;
+    this.view.commitMinedBlock(this.world, hit.x, hit.y, hit.z);
     this.effects.burst(hit, b.color);
     if(canHarvest && !enchantLevel(this.inventory.held,"silk") && [B.Coal,B.Jade].includes(b.id as never))this.xp++;
     if (this.mode !== "creative" && tool?.tool) this.inventory.wear();
@@ -1568,14 +1721,15 @@ export class Game {
   showTrade() {
     const e = this.tradeEntity;
     if (!e) return;
+    const available = this.entities.canInteractWith(e,this.body.position,5);
     this.ui.panel(
       "trade",
       esc(e.name),
-      `${esc(e.profession ? PROFESSIONS[e.profession].label : "Resident")} · ${esc(this.entities.life?.description(e.id) || e.state)}${offersFor(e).length ? " · Offers restock at dawn." : ""}`,
+      `${esc(e.profession ? PROFESSIONS[e.profession].label : "Resident")} · ${available ? esc(this.entities.life?.description(e.id) || e.state) : "Resident is no longer available."}${available && offersFor(e).length ? " · Offers restock at dawn." : ""}`,
       `<div class="trade-list">${offersFor(e)
         .map(
           ({ offer, id }) =>
-            `<button data-action="trade" data-id="${id}" ${e.trades >= 12 ? "disabled" : ""}>${icon(offer.output[0])}<span>${offer.label}</span><span>${offer.cost.map(([itemId, count]) => `${count} ${item(itemId)?.name}`).join(" + ")} → ${offer.output[1]}</span></button>`,
+            `<button data-action="trade" data-id="${id}" ${!available || e.trades >= 12 ? "disabled" : ""}>${icon(offer.output[0])}<span>${offer.label}</span><span>${offer.cost.map(([itemId, count]) => `${count} ${item(itemId)?.name}`).join(" + ")} → ${offer.output[1]}</span></button>`,
         )
         .join("")}</div><p class="form-note">${offersFor(e).length ? `${12 - e.trades} trades remaining today · You have ${this.inventory.count(111)} jade tokens.` : "No goods for trade at this post."}</p>`,
     );
@@ -1659,25 +1813,21 @@ export class Game {
     this.attackCooldown = Math.max(0, this.attackCooldown - dt);
     this.hitFlash = Math.max(0, this.hitFlash - dt);
     this.time = (this.time + dt / 1200) % 1;
-    const k = this.input.keys,
+    const intent = this.input.readTick(this.cooldown <= 0),
       p = this.body.position,
       v = this.body.velocity,
       water = inWater(this.world, p),
       spectator = this.mode === "spectator",
       fly = this.body.flying || spectator;
-    let f = Number(k.has("KeyW")) - Number(k.has("KeyS")),
-      r = Number(k.has("KeyD")) - Number(k.has("KeyA"));
-    const length = Math.hypot(f, r) || 1;
-    f /= length;
-    r /= length;
-    const requestedCrouch = k.has("ControlLeft") || k.has("KeyC");
+    const f = intent.moveY, r = intent.moveX;
+    const requestedCrouch = this.input.held("crouch");
     const control = flightControls(
-      requestedCrouch, k.has("Space"), fly, this.crouching,
+      requestedCrouch, this.input.held("jump"), fly, this.crouching,
       !fly && this.crouching && collides(this.world, p, 1.75),
     );
     this.crouching = control.crouching;
     const crouch = this.crouching,
-      sprint = k.has("ShiftLeft") && (fly || this.hunger > 4);
+      sprint = this.input.held("sprint") && (fly || this.hunger > 4);
     let speed = fly ? 9 : crouch ? 2 : water ? 2.6 : sprint ? 7 : 4.4;
     if (fly && sprint) speed = 18;
     if(this.status.has("speed") && !fly) speed*=1.25;
@@ -1687,11 +1837,11 @@ export class Game {
     v.z += (dz - v.z) * Math.min(1, dt * 12);
     const ladder = idOf(this.world.get(p.x, p.y, p.z)) === B.Ladder;
     if (fly) v.y = control.verticalIntent * speed;
-    else if (ladder) v.y = k.has("Space") || f > 0 ? 3 : crouch ? 0 : -1;
+    else if (ladder) v.y = this.input.held("jump") || f > 0 ? 3 : crouch ? 0 : -1;
     else {
       v.y = Math.max(water ? -4 : -38, v.y - (water ? 5 : 24) * dt);
       if (this.jumpRequest && this.body.grounded) v.y = 8.2;
-      if (water && k.has("Space")) v.y = 4;
+      if (water && this.input.held("jump")) v.y = 4;
     }
     this.jumpRequest = false;
     if (crouch && this.body.grounded && !fly)
@@ -1722,9 +1872,9 @@ export class Game {
       this.direction(),
       Math.min(4, this.hit?.distance ?? 4),
     );
-    if ((this.input.right || this.useRequest) && this.cooldown<=0) {this.useRequest=false;this.use();}
+    if ((this.input.held("secondary") || this.useRequest) && this.cooldown<=0) {this.useRequest=false;this.use();}
     if (
-      (this.input.left || this.input.leftPressed) &&
+      (this.input.held("primary") || this.input.pressed("primary")) &&
       this.entityHit &&
       this.mode !== "spectator"
     ) {
@@ -1759,15 +1909,20 @@ export class Game {
         this.attackCooldown = 0.5;
       }
     } else this.mine(dt);
-    this.input.leftPressed = false;
+    this.input.consumeTick();
     this.simulation.radius=this.settings.simulationDistance*16;
     this.entities.radius=this.settings.simulationDistance*16;
     this.simulation.automation.containers=this.containers;
     this.simulation.automation.drops=this.entities.drops;
-    this.simulation.occupants=[...this.entities.list.filter(e=>e.health>0).map(e=>e.body.position),...this.entities.drops.map(d=>d.position)];
+    this.simulation.occupants=this.entities.occupantPositions;
+    const simulationStarted=performance.now();
     this.simulation.tick(dt, p, this.mode !== "spectator");
-    this.entities.interactingId=this.ui.screen==="trade" ? this.tradeEntity?.id ?? "" : "";
+    this.view.metrics.add("simulation",performance.now()-simulationStarted);
+    const tradeActor=this.tradeEntity;
+    this.entities.interactingId=this.ui.screen==="trade" && tradeActor &&
+      this.entities.canInteractWith(tradeActor,this.body.position,5) ? tradeActor.id : "";
     this.entities.weather = this.simulation.weather;
+    const entitiesStarted=performance.now();
     this.entities.tick(
       dt,
       p,
@@ -1781,6 +1936,7 @@ export class Game {
       },
       this.mode !== "spectator",
     );
+    this.view.metrics.add("entities",performance.now()-entitiesStarted);
     const walking=this.body.grounded&&!this.body.flying&&this.mode!=="spectator";
     // Recognize the walk while input is held, independently of the slower
     // collection cadence. Stopping between polls must not lose a real visit.
@@ -1823,30 +1979,75 @@ export class Game {
     }
   }
   frame(t: number) {
+    if(this.disposed)return;
+    const inputElapsed=this.lastInputTime?Math.min(.2,Math.max(0,(t-this.lastInputTime)/1000)):0;
+    this.lastInputTime=t;
+    if(document.hidden||this.view.contextLost){
+      this.framePacer.ready(t,"hidden");if(this.framePacer.transitioned){this.input.clear();this.adaptive.suspend();}
+      this.lastTime=0;this.lastFrameWorkMs=0;this.accumulator=0;this.scheduleFrame();return;
+    }
+    this.input.poll(inputElapsed);
+    this.ui.touchControls?.setGameplay(this.active && !this.dead && !this.travelState && this.ui.screen === "none" && this.input.state.context === "gameplay", this.mode);
+    const simulating=this.active&&!this.dead&&["none","inventory","craft","chest","furnace","trade","enchant","brew","anvil","hopper"].includes(this.ui.screen);
+    const distant=this.view.distant;
+    const backgroundWorkPending=hasFrameBackgroundWork(this.world.dirty.size>0,this.world.pending.size>0,
+      this.lighting.pending,!!distant?.group.visible,!!distant?.stats.ready);
+    const urgentRedraw=frameUrgent(this.active,this.view.needsDrawingUpdate,backgroundWorkPending);
+    if(!this.framePacer.ready(t,simulating?"playing":"paused",this.settings.frameRateLimit,urgentRedraw)){
+      this.scheduleFrame();return;
+    }
+    if(this.framePacer.transitioned){this.lastTime=0;this.lastFrameWorkMs=0;this.accumulator=0;this.adaptive.suspend();}
+    const frameWorkStarted=performance.now();
     const elapsed=this.lastTime ? t-this.lastTime : 0;
     if(elapsed) this.view.metrics.add("frame",elapsed);
     const dt = Math.min(0.2, elapsed/1000);
     this.lastTime = t;
     this.frameCount++;
     if(this.travelState) {
+      // Travel is not an active-play measurement window. Discard the old
+      // district's samples so arrival starts with a clean adaptive warmup.
+      this.adaptive.suspend();
       // Keep the last frame behind the preparation panel. Spending this time
       // on the old district's meshes/GPU/lighting delays collision readiness.
-      this.accumulator=0;requestAnimationFrame(t=>this.frame(t));return;
+      this.accumulator=0;this.lastFrameWorkMs=0;this.scheduleFrame();return;
     }
     if (t - this.fpsTime > 1000) {
       this.fps = Math.round((this.frameCount * 1000) / (t - this.fpsTime));
       this.frameCount = 0;
       this.fpsTime = t;
+      const gameplay = this.active && this.ui.screen === "none" && !this.dead && !this.travelState;
+      if (gameplay) {
+        const advice = this.performanceAdvisor.sample(this.fps, this.settings.graphicsQuality, true, t);
+        if (advice === "recovered") {
+          this.performanceRecommendation = null;
+          this.performanceRecommendationFps = 0;
+          this.ui.hidePerformanceAdvisor();
+        } else if (advice) {
+          this.performanceRecommendation = advice;
+          this.performanceRecommendationFps = this.fps;
+          this.ui.showPerformanceAdvisor(this.settings.graphicsQuality, advice, this.fps);
+        }
+      }
     }
     const p = this.body.position;
-    for (const key of this.world.stream(
+    const streamStarted=performance.now();
+    const evicted=this.world.stream(
       this.active ? p.x : 0,
       this.active ? p.z : 0,
       this.settings.distance,
       this.yaw,
-    ))
-      this.view.remove(key);
+    );
+    this.view.metrics.add("worldStream",performance.now()-streamStarted);
+    const evictionStarted=performance.now();
+    if(evicted.length)this.lighting.pruneUnloaded(evicted);
+    for(const key of evicted)this.view.remove(key);
+    this.view.metrics.add("worldEviction",performance.now()-evictionStarted);
+    const targetFrameMs=1000/Math.max(1,this.framePacer.targetFps||60);
+    const frameHeadroomMs=Math.max(0,targetFrameMs-this.lastFrameWorkMs);
+    this.view.setMeshAdmissionHeadroom(frameHeadroomMs);
+    const meshQueueStarted=performance.now();
     this.view.rebuild(this.world, 6);
+    this.view.metrics.add("meshQueue",performance.now()-meshQueueStarted);
     if (
       this.active &&
       ["none", "inventory", "craft", "chest", "furnace", "trade", "enchant", "brew", "anvil", "hopper"].includes(
@@ -1879,15 +2080,19 @@ export class Game {
         this.ui.screen === "none" && this.mode !== "spectator";
       // Subtle idle breathing and a short interaction swing; no perpetual sway.
       const heldSway = Math.sin(t * 0.0027);
-      const heldSwing = this.input.left ? Math.sin(t * 0.022) * 0.18 : 0;
+      const heldSwing = this.input.held("primary") ? Math.sin(t * 0.022) * 0.18 : 0;
       this.view.hand.rotation.x = -0.12 - heldSwing + heldSway * 0.012;
       this.view.hand.rotation.z = -0.26 + Math.sin(t * 0.0021) * 0.01;
       this.view.hand.position.y = -0.64 + heldSway * 0.005;
       this.view.environment(this.time, this.simulation.weather === "rain",this.status.has("night_vision"),dt);
+      const actorRenderStarted=performance.now();
       this.entityView.update(this.entities, t / 1000,this.view.camera,this.view.graphicsProfile);
+      this.view.metrics.add("actorRender",performance.now()-actorRenderStarted);
+      const effectsStarted=performance.now();
       this.effects.update(dt, p, this.view.atmosphere.rain*this.view.rainExposure, t / 1000);
+      this.view.metrics.add("effects",performance.now()-effectsStarted);
       if (
-        this.lighting.pending ||
+        this.lighting.pending || this.lighting.needsUpdate ||
         (t - this.lastLighting > 1200 && this.world.pending.size === 0)
       ) {
         if (!this.lighting.pending) this.lastLighting = t;
@@ -1899,14 +2104,55 @@ export class Game {
         this.lastHud = t;
         const hour = Math.floor((this.time * 24 + 6) % 24),
           minute = Math.floor((this.time * 1440) % 60);
+        const debugInspectStarted = this.debug ? performance.now() : 0;
         const geography = this.debug ? this.world.inspectTerrain(p.x, p.z) : undefined;
         const architecture = this.debug ? this.world.inspectDistrict(p.x,p.z) : undefined;
         const landmarkDebug = this.debug ? this.world.inspectLandmark(p.x,p.z) : undefined;
         const urbanDebug = architecture ? `\n${architecture.district?.name ?? "Outside districts"} · ${architecture.road?.kind ?? "off street"} · ${architecture.lot?.archetype ?? "open space"} / ${architecture.lot?.roofFamily ?? "—"} / ${architecture.lot?.facade ?? "—"}` : "";
+        if (this.debug) this.view.metrics.add("debugInspect", performance.now() - debugInspectStarted);
+        const hudStarted=performance.now();
+        const debugHudStarted = this.debug ? performance.now() : 0;
+        const metricSnapshot = this.debug ? this.view.metrics.snapshot() : undefined;
+        const metricFormat = (name: string) => {
+          const value = metricSnapshot?.[name];
+          return value ? `${value.p50.toFixed(2)}/${value.p95.toFixed(2)}/${value.max.toFixed(2)}` : "0.00/0.00/0.00";
+        };
+        const queue = this.view.meshQueueStats;
+        let loadedDataSections = 0;
+        if (this.debug) for (const chunk of this.world.chunks.values()) loadedDataSections += chunk.blocks.sections.size;
+        const f3OnFrame = metricSnapshot?.["frameWork.f3On"];
+        const f3OffFrame = metricSnapshot?.["frameWork.f3Off"];
+        const f3OnSubmit = metricSnapshot?.["renderSubmit.f3On"];
+        const f3OffSubmit = metricSnapshot?.["renderSubmit.f3Off"];
+        const signedDelta = (value: number) => `${value >= 0 ? "+" : ""}${value.toFixed(2)}`;
+        const f3Comparison = f3OnFrame && f3OffFrame && f3OnSubmit && f3OffSubmit &&
+          f3OnFrame.count >= 24 && f3OffFrame.count >= 24 &&
+          f3OnSubmit.count >= 24 && f3OffSubmit.count >= 24
+          ? `F3 A/B p50 Δ frame ${signedDelta(f3OnFrame.p50 - f3OffFrame.p50)} ms · submit ${signedDelta(f3OnSubmit.p50 - f3OffSubmit.p50)} ms · p95 frame ${signedDelta(f3OnFrame.p95 - f3OffFrame.p95)} ms · n ${f3OnFrame.count}/${f3OffFrame.count}`
+          : `F3 A/B collecting · frame n ${f3OnFrame?.count ?? 0}/${f3OffFrame?.count ?? 0} · submit n ${f3OnSubmit?.count ?? 0}/${f3OffSubmit?.count ?? 0} (need 24 each)`;
+        const subsystemTiming =
+          `CPU p50/p95/max ms: stream ${metricFormat("worldStream")} · evict ${metricFormat("worldEviction")} · meshQ ${metricFormat("meshQueue")} · mesh ${metricFormat("mesh")} · commit ${metricFormat("meshCommit")} · generation ${metricFormat("generation")}\n` +
+          `CPU p50/p95/max ms: sim ${metricFormat("simulation")} · tick ${metricFormat("tick")} · entities ${metricFormat("entities")} · actors ${metricFormat("actorRender")}\n` +
+          `CPU p50/p95/max ms: lighting ${metricFormat("lighting")} · effects ${metricFormat("effects")} · atmosphere ${metricFormat("atmosphere")} · distant ${metricFormat("distant")} · submit ${metricFormat("renderSubmit")}\n` +
+          `CPU p50/p95/max ms: frameWork ${metricFormat("frameWork")} · F3 inspect ${metricFormat("debugInspect")} · F3 HUD ${metricFormat("debugHud")} · GPU ${metricFormat("gpuRender")}`;
+        const worldReadiness = queue.scanComplete
+          ? `visible ${queue.visibleReady}/${queue.visibleQueued} ready (${(queue.visibleWorldProgress*100).toFixed(0)}%) · background ${queue.backgroundReady}/${queue.backgroundQueued}`
+          : `visible readiness scanning · ${queue.scanRemaining} dirty keys undiscovered`;
+        const streaming=this.world.streamingDiagnostics;
+        const queueDebug =
+          `Sections data ${loadedDataSections} · meshed ${queue.meshed} · non-empty groups ${queue.renderedSections} · deferred ${queue.deferred}\n` +
+          `Visible mesh readiness ${queue.visibleWorldReady ? "READY" : worldReadiness} · pending visible ${queue.visiblePending} / background ${queue.backgroundPending}\n` +
+          `Mesh queue ${queue.queuedBefore}→${queue.queuedAfter} dirty · ${queue.eligible}/${queue.scanned} eligible/scanned · ${queue.scanComplete ? "scan complete" : `scan pending ${queue.scanRemaining}`} · remesh ${queue.dirtyRemesh} · first ${queue.dirtyFirstBuild} · built ${queue.processed} (${queue.rendered} non-empty/${queue.empty} empty) · max section ${queue.maxSectionMs.toFixed(2)} ms · backlog ${queue.queueAgeMs.toFixed(0)} ms\n` +
+          `Admission ${queue.admissionBacklog} pending (peak ${queue.admissionBacklogHighWater}) · ${queue.admittedThisFrame}/${queue.admissionLimit} keys · ${queue.admissionTimeMs.toFixed(2)} / ${queue.admissionBudgetMs.toFixed(2)} ms · headroom ${queue.admissionHeadroomMs.toFixed(1)} ms · cost ${queue.admissionCostMsPerKey.toFixed(4)} ms/key\n` +
+          `Mesh pressure ${queue.queuedCandidates} queued candidates · ${queue.activeSections} active sections · ${queue.activeJobs} jobs / ${queue.pendingCommits} commits · active work ${queue.activeMeshingMs.toFixed(2)}/${queue.meshBudgetMs.toFixed(2)} ms · admission pressure ${(queue.admissionPressure*100).toFixed(0)}%\n` +
+          `Mesh memory: ${queue.sectionCoordinateCache} coordinate records · ${queue.candidatePoolCapacity} reusable candidate slots`;
+        const debugText = this.debug
+          ? `${this.view.graphicsDebug()}\nResidents rendered ${this.entityView.stats.full}/${this.entityView.stats.mid}/${this.entityView.stats.far} full/mid/far · ${this.entityView.stats.culled} culled\n${geography?.region ?? "terrain unavailable"} · ${geography?.reservation ?? "no landmark reserve"}\n${geography ? `Slope ${geography.slope.toFixed(2)} · buildable ${geography.buildable} · plan ${geography.planMs.toFixed(1)} ms / ${this.world.planCount} active` : "Terrain data unavailable"}\n${urbanDebug}${landmarkDebug ? `\n${landmarkDebug.name} · ${landmarkDebug.reservation.id}` : ""}\n${this.fps} FPS · target 20 TPS\nFrame p50/p95/p99 ${metricSnapshot?.frame?.p50.toFixed(1) ?? "0.0"}/${metricSnapshot?.frame?.p95.toFixed(1) ?? "0.0"}/${metricSnapshot?.frame?.p99.toFixed(1) ?? "0.0"} ms · adaptive ${this.adaptive.state} ${(this.adaptive.scale*100).toFixed(0)}% · ${this.adaptive.bottleneck} · ${this.adaptive.decision} · target ${this.framePacer.targetFps||"display"} FPS · tick p95 ${metricSnapshot?.tick?.p95.toFixed(1) ?? "0.0"} ms\n${this.world.chunks.size} chunks · ${this.world.pending.size} generating · dirty ${this.world.dirty.size} mesh queue\nStreaming ${streaming.streamFrames} frames · ${streaming.streamRequests} requests · ${streaming.streamEvictions} evictions · preempt ${streaming.workerPreemptions}\nWorker queue ${streaming.workerQueued} / peak ${streaming.workerQueueHighWater} · pending peak ${streaming.pendingHighWater} · pruned ${streaming.workerQueuePruned} · wait avg/max ${streaming.workerQueueWaitAverageMs.toFixed(1)}/${streaming.workerQueueWaitMaxMs.toFixed(1)} ms · oldest ${streaming.oldestQueuedAgeMs.toFixed(1)} ms · active ${streaming.workerBusyAgeMs.toFixed(1)} ms\n${queueDebug}\n${this.view.worldRenderStats.triangles} triangles · ${this.view.worldRenderStats.calls} draws · ${this.view.renderer.info.memory.geometries} geometries\n${this.view.renderAuditDebug()}\n${this.view.renderAuditUntrackedDebug(t)}\n${subsystemTiming}\n${f3Comparison}\n${this.entities.list.length} entities · ${this.entities.life?.metrics.active ?? "inactive"} active residents · ${this.entities.navigation.agents.size} routes / ${this.entities.navigation.expandedLastTick} nodes\nLife ${this.entities.life?.metrics.scheduleMs.toFixed(2) ?? "0"} ms · nav ${this.entities.navigation.solveMs.toFixed(2)} ms · ${this.entities.life?.event?.title ?? "no gathering"}\n${this.view.atmosphere.phase} · fog ${this.view.atmosphere.fogNear.toFixed(0)}/${this.view.atmosphere.fogFar.toFixed(0)} · LOD ${this.view.distant?.stats.terrainTriangles??0}+${this.view.distant?.stats.waterTriangles??0}+${this.view.distant?.stats.anchorTriangles??0} triangles · proxy terrain ${this.view.distant?.stats.terrainReady?"ready":"building"} / anchors ${this.view.distant?.stats.anchorsReady?"ready":"building"}\n${this.world.evictionBlocked} pinned unsaved chunks\nCPU block arrays ~${([...this.world.chunks.values()].reduce((n,c)=>n+c.blocks.byteLength,0)/1048576).toFixed(1)} MiB (excludes GPU/heap)\n${this.world.edits.size} edits · save rev ${this.saveRevision} · ${this.meta.seed}`
+          : "";
         this.ui.updateHUD(this.inventory, {
           name: this.meta.name,
           mode: this.mode,
-          biome: biomeAt(p.x, p.z, seedNumber(this.meta.seed), this.world.generatorVersion),
+          biome: biomeAt(p.x, p.z, seedNumber(this.meta.seed)),
           x: Math.floor(p.x),
           y: Math.floor(p.y),
           z: Math.floor(p.z),
@@ -1925,21 +2171,23 @@ export class Game {
           progress: this.mineProgress,
           hitFlash: this.hitFlash > 0,
           hitMessage: this.hitFlash > 0 ? this.hitMessage : "",
-          debug: this.debug
-            ? `${this.view.graphicsDebug()}\nResidents rendered ${this.entityView.stats.full}/${this.entityView.stats.mid}/${this.entityView.stats.far} full/mid/far · ${this.entityView.stats.culled} culled\nGenerator ${this.world.generatorVersion} · ${geography?.region ?? "legacy geography"} · ${geography?.reservation ?? "no landmark reserve"}\n${geography ? `Slope ${geography.slope.toFixed(2)} · buildable ${geography.buildable} · plan ${geography.planMs.toFixed(1)} ms / ${this.world.planCount} active` : "Legacy v3 terrain retained"}\n${urbanDebug}${landmarkDebug ? `\n${landmarkDebug.name} · ${landmarkDebug.reservation.id}` : ""}\n${this.fps} FPS · target 20 TPS\nFrame p50/p95 ${this.view.metrics.summary("frame").p50.toFixed(1)}/${this.view.metrics.summary("frame").p95.toFixed(1)} ms · tick p95 ${this.view.metrics.summary("tick").p95.toFixed(1)} ms\n${this.world.chunks.size} chunks · ${this.world.pending.size} generating · ${this.world.dirty.size} mesh queue\n${this.view.worldRenderStats.triangles} triangles · ${this.view.worldRenderStats.calls} draws · ${this.view.renderer.info.memory.geometries} geometries\n${this.entities.list.length} entities · ${this.entities.life?.metrics.active ?? "legacy"} active residents · ${this.entities.navigation.agents.size} routes / ${this.entities.navigation.expandedLastTick} nodes\nLife ${this.entities.life?.metrics.scheduleMs.toFixed(2) ?? "0"} ms · nav ${this.entities.navigation.solveMs.toFixed(2)} ms · ${this.entities.life?.event?.title ?? "no gathering"}\n${this.view.atmosphere.phase} · fog ${this.view.atmosphere.fogNear.toFixed(0)}/${this.view.atmosphere.fogFar.toFixed(0)} · LOD ${this.view.distant?.stats.terrainTriangles??0}+${this.view.distant?.stats.anchorTriangles??0} triangles\n${this.world.evictionBlocked} pinned unsaved chunks\nCPU block arrays ~${([...this.world.chunks.values()].reduce((n,c)=>n+c.blocks.byteLength,0)/1048576).toFixed(1)} MiB (excludes GPU/heap)\n${this.world.edits.size} edits · save rev ${this.saveRevision} · ${this.meta.seed}`
-            : "",
+          debug: debugText,
         });
+        this.view.metrics.add("hud",performance.now()-hudStarted);
+        if (this.debug) this.view.metrics.add("debugHud", performance.now() - debugHudStarted);
       }
-      if (t - this.lastAuto > 8000) {
+      if (t - this.lastAuto > 8000 && !this.saveConflicted) {
         this.lastAuto = t;
         void this.save();
       }
     } else {
       this.view.target(null);
       this.view.environment(0.23);
+      const actorRenderStarted=performance.now();
       this.entityView.update(this.entities, t / 1000,this.view.camera,this.view.graphicsProfile);
+      this.view.metrics.add("actorRender",performance.now()-actorRenderStarted);
       if (
-        this.lighting.pending ||
+        this.lighting.pending || this.lighting.needsUpdate ||
         (t - this.lastLighting > 2000 && this.world.pending.size === 0)
       ) {
         if (!this.lighting.pending) this.lastLighting = t;
@@ -1949,7 +2197,29 @@ export class Game {
       }
     }
     if(this.active)this.view.updateDistant(this.world);
+    this.view.setRenderAuditEnabled(this.debug);
+    const drawStarted=performance.now();
     this.view.render();
-    requestAnimationFrame((t) => this.frame(t));
+    const renderCpu=performance.now()-drawStarted;
+    this.view.metrics.add("renderSubmit",renderCpu);
+    const debugBenchmarkActive = this.active && !this.dead && this.ui.screen === "none" &&
+      !this.travelState && !this.view.contextLost;
+    if (debugBenchmarkActive)
+      this.view.metrics.add(this.debug ? "renderSubmit.f3On" : "renderSubmit.f3Off", renderCpu);
+    const gpuSample=this.view.consumeGpuTiming();
+    if(gpuSample)this.view.metrics.add("gpuRender",gpuSample.timeMs);
+    const cpu=performance.now()-frameWorkStarted;
+    this.lastFrameWorkMs=cpu;
+    this.view.metrics.add("frameWork",cpu);
+    if (debugBenchmarkActive)
+      this.view.metrics.add(this.debug ? "frameWork.f3On" : "frameWork.f3Off",cpu);
+    // Observe the complete active-play workload, including chunk generation,
+    // dirty-mesh rebuilds and distant-world preparation. Those periods are
+    // precisely when frame pacing must remain visible to the controller.
+    // Menus, death, travel and context loss remain excluded and reset warmup.
+    const adaptiveGameplay=this.active&&!this.dead&&this.ui.screen==="none"&&!this.travelState&&!this.view.contextLost;
+    if(adaptiveGameplay)this.view.setResolutionScale(this.adaptive.observe(t,elapsed,cpu,renderCpu,gpuSample?.timeMs??null,this.framePacer.targetFps));
+    else this.adaptive.suspend();
+    this.scheduleFrame();
   }
 }

@@ -1,9 +1,11 @@
+import { createId } from "../core/ids";
+import { activeSimulationCandidates } from "./city-life/active-actors";
 import { cloneStack, sameStack } from "./stack";
 import { item } from "./items";
 import { World } from "../world/world";
 import { Vec3, distance, idOf, stateOf, packed } from "../core/coords";
 import { block, B } from "../world/blocks";
-import { Body, moveBody, collides } from "../player/physics";
+import { Body, moveBody } from "../player/physics";
 import { Inventory, Stack } from "./inventory";
 import { Navigation, standAt, traversable } from "./navigation/pathfinder";
 import { Profession, PROFESSIONS, residents } from "./professions";
@@ -11,8 +13,15 @@ import { hash } from "../world/noise";
 import { meleeSightBetween, rayBoxDistance } from "./combat";
 import { CityLife } from "./city-life/runtime";
 import { scheduleAt } from "./city-life/schedules";
-import { circuitStart, PRESENCE_BUDGET } from "./city-life/presence";
-import { STREET_LIFE_BUDGET } from "./city-life/street-life";
+import { circuitStart } from "./city-life/presence";
+import { shouldYieldToMovingActor } from "./occupancy";
+
+// Pack the 4-block local occupancy grid into a safe integer key. The world
+// coordinate contract keeps each cell coordinate within the biased range.
+const OCCUPANCY_CELL_BIAS = 4_194_304;
+const OCCUPANCY_CELL_STRIDE = 8_388_608;
+const occupancyCellKey = (gx:number,gz:number) =>
+  (gx+OCCUPANCY_CELL_BIAS)*OCCUPANCY_CELL_STRIDE+(gz+OCCUPANCY_CELL_BIAS);
 export type Entity = {
   id: string;
   kind: "villager" | "panda" | "spirit";
@@ -82,7 +91,7 @@ export function spawnEntity(
   name: string = kind,
 ) {
   return {
-    id: crypto.randomUUID(),
+    id: createId(),
     kind,
     name,
     body: {
@@ -132,7 +141,13 @@ export function spiritSpawnSite(world: World, player: Vec3, elapsed: number): Ve
 }
 
 export class Entities {
-  list: Entity[] = [];
+  private entityList: Entity[] = [];
+  private actorIndexReady=false;
+  get list() { return this.entityList ?? []; }
+  set list(value:Entity[]) {
+    this.entityList=Array.isArray(value)?value:[];
+    if(this.actorIndexReady)this.indexActors();
+  }
   drops: Drop[] = [];
   radius = 64;
   elapsed = 0;
@@ -142,6 +157,18 @@ export class Entities {
   interactingId = "";
   life?: CityLife;
   private populationInitialized = false;
+  private residentEntities: Entity[] = [];
+  private otherActors: Entity[] = [];
+  private renderActorsBuffer: Entity[] = [];
+  private simulatedActorsBuffer: Entity[] = [];
+  private entityById = new Map<string, Entity>();
+  private pendingRemoval = new Set<Entity>();
+  private occupantPositionsBuffer: Vec3[] = [];
+  private occupantsDirty = true;
+  private localGrid = new Map<number, Entity[]>();
+  private localGridPool: Entity[][] = [];
+  private threatBuffer: Entity[] = [];
+  private simulatedIds = new Set<string>();
   weather = "clear";
   tickMs = 0;
   constructor(
@@ -151,8 +178,8 @@ export class Entities {
   ) {
     this.navigation=new Navigation(world);
     // An explicitly empty entity component has no resident work to plan.
-    if (world.generatorVersion >= 6 && world.landmarkPlan && (!Array.isArray(data?.entities) || data.entities.length > 0)) this.life = new CityLife(world);
-    this.populationInitialized = !!this.life || data?.cityLifeVersion === 1 || data?.cityLifeVersion === 2 || data?.cityLifeVersion === 3 || data?.cityLifeVersion === 4 || data?.cityLifeVersion === 5;
+    if (world.landmarkPlan && (!Array.isArray(data?.entities) || data.entities.length > 0)) this.life = new CityLife(world);
+    this.populationInitialized = !!this.life || data?.cityLifeVersion === 5;
     const population = this.life?.plan?.residents;
     const create = (r: { id: string; name: string; profession: Profession; home: Vec3; workplace: Vec3 }) => {
       const planned = this.life?.plan?.byId.get(r.id);
@@ -162,30 +189,81 @@ export class Entities {
     };
     if (Array.isArray(data?.entities)) {
       this.list = [...data.entities as Entity[]];
-      // Extend an actual generator-9 resident save once. Removed original residents
-      // stay removed; a current population marker prevents resurrecting deaths.
-      const firstExtension = data.cityLifeVersion === undefined && this.list.some(e => population?.some(r => r.legacy && r.id === e.id));
-      const densityExtension = world.generatorVersion === 7 && data.cityLifeVersion === 1;
-      const regionalExtension = world.generatorVersion >= 9 && data.cityLifeVersion !== 4 && data.cityLifeVersion !== 5;
-      const fabricExtension = world.generatorVersion >= 8 && (data.cityLifeVersion === 1 || data.cityLifeVersion === 2);
-      if (population && (firstExtension || densityExtension || fabricExtension || regionalExtension)) {
-        // An explicit new-layout copy may put an old sidewalk under a wider
-        // building. Rehome its existing identities once at their new authored
-        // routine anchors, preserving health/trades and never touching v7 saves
-        // or later initialized v8 saves. This is not a live-player catch-up.
-        if(fabricExtension||regionalExtension)for(const e of this.list) {
-          const r=this.life?.plan?.byId.get(e.id);if(e.kind!=="villager"||!r)continue;
-          const start=create(r);e.body={...start.body};e.goal={...start.goal};e.home={...r.home};e.workplace={...r.workplace};
-        }
-        const ids = new Set(this.list.map(e => e.id));
-        const limit=world.generatorVersion>=8?STREET_LIFE_BUDGET.saveEntities-6:world.generatorVersion===7?PRESENCE_BUDGET.saveEntities-6:250;
-        for (const r of population) if ((regionalExtension&&data.cityLifeVersion===3?r.id.includes(":region9:"):fabricExtension&&data.cityLifeVersion===2?r.id.startsWith("inhabitant:"):densityExtension||fabricExtension?!!r.neighborhood:!r.legacy) && !ids.has(r.id) && this.list.length < limit) this.list.push(create(r));
-      }
     } else this.list = [
       ...(population ?? residents(world.seed, world.cityPlan)).map(create),
       spawnEntity("panda", { x:14,y:21.1,z:-35 }, "Bamboo panda"),
     ];
     if (Array.isArray(data?.drops)) this.drops = data!.drops as Drop[];
+    this.indexActors();
+  }
+  private indexActors() {
+    this.residentEntities??=[];this.otherActors??=[];this.entityById??=new Map();this.pendingRemoval??=new Set();
+    this.renderActorsBuffer??=[];this.simulatedActorsBuffer??=[];this.occupantPositionsBuffer??=[];
+    this.residentEntities.length=0;this.otherActors.length=0;this.entityById.clear();this.pendingRemoval.clear();
+    for(const e of this.list){
+      this.entityById.set(e.id,e);
+      if(e.kind==="villager")this.residentEntities.push(e);else this.otherActors.push(e);
+      if(e.health<=0)this.pendingRemoval.add(e);
+    }
+    if(this.life?.activeActors){
+      this.life.activeActors.length=0;
+      for(const e of this.residentEntities)if(this.life.active.has(e.id))this.life.activeActors.push(e);
+    }
+    this.occupantsDirty=true;this.actorIndexReady=true;
+  }
+  private ensureActorIndexes() {
+    if(!this.actorIndexReady||!this.entityById||this.entityById.size!==this.list.length)this.indexActors();
+  }
+  get residentPopulation() { this.ensureActorIndexes();return this.residentEntities; }
+  refreshOccupants() { this.ensureActorIndexes();this.occupantsDirty=true; return this.occupantPositions; }
+  get occupantPositions() {
+    this.ensureActorIndexes();
+    if(this.occupantsDirty){
+      this.occupantPositionsBuffer.length=0;
+      // Pressure plates must observe the same resident population that is
+      // actually represented in the world. Inactive city residents are
+      // persistent schedule records, not physical actors for this tick.
+      for(const e of this.renderActors())
+        this.occupantPositionsBuffer.push(e.body.position);
+      // Keep all drop position references; the circuit evaluator checks live
+      // chunk residency so an unloaded drop can become physical on chunk load
+      // without forcing an occupant-cache rebuild.
+      for(const d of this.drops)this.occupantPositionsBuffer.push(d.position);
+      this.occupantsDirty=false;
+    }
+    return this.occupantPositionsBuffer;
+  }
+  /** Current render set: <=96 detailed residents plus the small encounter set. */
+  renderActors() {
+    this.ensureActorIndexes();
+    const out=this.renderActorsBuffer;out.length=0;
+    const residents=this.life?this.life.activeActors:this.residentEntities;
+    for(const e of residents)if(e.health>0)out.push(e);
+    for(const e of this.otherActors)if(e.health>0)out.push(e);
+    return out;
+  }
+  private simulationActors(player:Vec3) {
+    this.ensureActorIndexes();
+    return activeSimulationCandidates(this.life?this.life.activeActors:this.residentEntities,this.otherActors,
+      this.world,player,this.radius,this.simulatedActorsBuffer);
+  }
+  private addActor(e:Entity) {
+    this.list.push(e);this.otherActors.push(e);this.entityById.set(e.id,e);this.occupantsDirty=true;
+  }
+  private removeActor(e:Entity) {
+    const listIndex=this.list.indexOf(e);if(listIndex>=0)this.list.splice(listIndex,1);
+    const otherIndex=this.otherActors.indexOf(e);if(otherIndex>=0)this.otherActors.splice(otherIndex,1);
+    if(e.kind==="villager"){
+      const residentIndex=this.residentEntities.indexOf(e);if(residentIndex>=0)this.residentEntities.splice(residentIndex,1);
+      this.life?.active.delete(e.id);this.life?.states.delete(e.id);
+      const activeIndex=this.life?.activeActors.indexOf(e)??-1;if(activeIndex>=0)this.life!.activeActors.splice(activeIndex,1);
+    }
+    this.entityById.delete(e.id);this.pendingRemoval.delete(e);this.navigation.agents.delete(e.id);this.occupantsDirty=true;
+  }
+  private flushPendingRemovals() {
+    if(!this.pendingRemoval.size)return;
+    for(const e of this.pendingRemoval)this.removeActor(e);
+    this.pendingRemoval.clear();
   }
   drop(stack: Stack, p: Vec3) { return this.dropMany([stack],p); }
   dropMany(stacks:(Stack|null)[],p:Vec3) {
@@ -202,10 +280,10 @@ export class Entities {
       while(count>0) {
         if(next.length>=256)return false;
         const n=Math.min(max,count);count-=n;
-        next.push({id:crypto.randomUUID(),stack:{...cloneStack(stack)!,count:n},position:{...p},velocity:{x:0,y:2,z:0},age:0});
+        next.push({id:createId(),stack:{...cloneStack(stack)!,count:n},position:{...p},velocity:{x:0,y:2,z:0},age:0});
       }
     }
-    this.drops=next;return true;
+    this.drops=next;this.occupantsDirty=true;return true;
   }
   tick(
     dt: number,
@@ -217,9 +295,17 @@ export class Entities {
     pickup: () => void,
     playerInteractive = true,
   ) {
+    this.ensureActorIndexes();
+    // Keep legacy/test-created Entities instances safe even when constructed
+    // without the class constructor; normal instances initialize these eagerly.
+    this.localGrid ??= new Map<number,Entity[]>();
+    this.localGridPool ??= [];
+    this.threatBuffer ??= [];
+    this.simulatedIds ??= new Set<string>();
     const tickStarted = performance.now();
     this.elapsed += dt;
     this.spawnClock += dt;
+    const pickupTarget = playerInteractive && this.drops.length ? { x: player.x, y: player.y + 0.7, z: player.z } : undefined;
     for (const d of this.drops) {
       d.age += dt;
       if (!this.world.loaded(d.position.x, d.position.z)) continue;
@@ -229,56 +315,70 @@ export class Entities {
         d.velocity.y = 0;
       else d.position.y = ny;
       if (
-        playerInteractive &&
+        pickupTarget &&
         d.age > 0.5 &&
-        distance(d.position, { ...player, y: player.y + 0.7 }) < 2
+        distance(d.position, pickupTarget) < 2
       ) {
         const remainder = inv.addStack(d.stack);
         if (remainder !== d.stack.count) pickup();
         d.stack.count = remainder;
       }
     }
-    this.drops = this.drops.filter((d) => d.stack.count > 0 && d.age < 600);
+    const dropCount=this.drops.length;
+    let keptDrops=0;
+    for(const drop of this.drops)if(drop.stack.count>0&&drop.age<600)this.drops[keptDrops++]=drop;
+    if(keptDrops!==dropCount){this.drops.length=keptDrops;this.occupantsDirty=true;}
     const night = time > 0.52;
-    if (this.wasNight && !night) for (const e of this.list) e.trades = 0;
+    if (this.wasNight && !night) { for (const e of this.residentEntities) e.trades = 0; for (const e of this.otherActors) e.trades = 0; }
     this.wasNight = night;
     // Hostiles are temporary encounters, not permanently persistent town NPCs.
-    // Unloaded/distant spirits must never occupy the local population cap.
-    this.list = this.list.filter((e) =>
-      e.kind !== "spirit" ||
-      (e.health > 0 && distance(e.body.position, player) <= this.radius + 20 &&
-        (night || distance(e.body.position, player) <= 30)),
-    );
-    const localSpirits = this.list.filter((e) =>
-      e.kind === "spirit" && e.health > 0 &&
-      distance(e.body.position, player) <= this.radius,
-    ).length;
+    // Inspect only the small non-resident actor set; the 4,080-resident registry
+    // is no longer filtered on every 20 Hz simulation tick.
+    for(let i=this.otherActors.length-1;i>=0;i--){
+      const e=this.otherActors[i];
+      if(e.kind==="spirit"&&(e.health<=0||distance(e.body.position,player)>this.radius+20||(!night&&distance(e.body.position,player)>30)))this.removeActor(e);
+    }
+    let localSpirits=0;
+    for(const e of this.otherActors)if(e.kind==="spirit"&&e.health>0&&distance(e.body.position,player)<=this.radius)localSpirits++;
     if (hostile && night && this.spawnClock >= 8 && localSpirits < 5) {
       this.spawnClock = 0;
       const site = spiritSpawnSite(this.world, player, this.elapsed);
-      if (site) this.list.push(spawnEntity("spirit", site, "Wandering spirit"));
+      if (site) this.addActor(spawnEntity("spirit", site, "Wandering spirit"));
     }
-    this.life?.prepare(this.list, player, time, this.weather === "rain", this.elapsed, this.navigation);
-    const simulated = this.list.filter(e => e.health > 0 && this.world.loaded(e.body.position.x, e.body.position.z) &&
-      distance(e.body.position, player) <= this.radius && (e.kind !== "villager" || !this.life || this.life.active.has(e.id)));
-    const localGrid = new Map<string, Entity[]>();
-    for (const e of simulated) { const p = e.body.position, key = `${Math.floor(p.x / 4)},${Math.floor(p.z / 4)}`;
-      const bin = localGrid.get(key) ?? []; bin.push(e); localGrid.set(key, bin); }
-    const threats = simulated.filter(e => e.kind === "spirit");
+    const scheduleUpdates=this.life?.metrics.updates??0;
+    this.life?.prepare(this.residentEntities, player, time, this.weather === "rain", this.elapsed, this.navigation);
+    if(this.life&&this.life.metrics.updates!==scheduleUpdates)this.occupantsDirty=true;
+    const simulated = this.simulationActors(player);
+    for(const bin of this.localGrid.values()){
+      bin.length=0;
+      if(this.localGridPool.length<256)this.localGridPool.push(bin);
+    }
+    this.localGrid.clear();
+    for(const e of simulated){
+      const p=e.body.position,key=occupancyCellKey(Math.floor(p.x/4),Math.floor(p.z/4));
+      let bin=this.localGrid.get(key);
+      if(!bin){bin=this.localGridPool.pop()??[];this.localGrid.set(key,bin);}
+      bin.push(e);
+    }
+    const threats=this.threatBuffer;threats.length=0;
+    for(const e of simulated)if(e.kind==="spirit")threats.push(e);
     for (const e of simulated) {
       // Another entity (for example a guard) may have killed this entity
       // earlier in the same tick. Dead actors must not steer or attack once.
       if (e.health <= 0) continue;
       const p = e.body.position,
         v = e.body.velocity;
-      if (!this.world.loaded(p.x, p.z) || distance(p, player) > this.radius) continue;
+      // `simulationActors()` already applied health, radius and loaded-chunk
+      // filters for this tick. No other actor changes this actor's position
+      // before its turn, so repeating the same checks here is redundant.
       e.cooldown = Math.max(0, e.cooldown - dt);
       e.timer -= dt;
       if (e.kind === "spirit" && !night) {
         e.health -= dt * 3;
-        if (e.health <= 0) continue;
+        if (e.health <= 0) { this.pendingRemoval.add(e); continue; }
       }
-      const danger=e.profession==='guard'?threats.find(q=>q.health>0 && distance(p,q.body.position)<12):undefined;
+      let danger:Entity|undefined;
+      if(e.profession==='guard')for(const q of threats)if(q.health>0&&distance(p,q.body.position)<12){danger=q;break;}
       const lifeGoal = e.kind === 'villager' ? this.life?.goal(e.id) : undefined;
       if(e.kind==='villager' && e.workplace) {
         e.goal={...(lifeGoal ?? (night ? e.home : e.workplace))};
@@ -325,7 +425,7 @@ export class Entities {
       // A stationary player occupies real street space. Dense-city pedestrians
       // take a short supported side step rather than passing through the camera.
       // Only two local probes are allowed; narrow blocked passages wait normally.
-      if(this.world.generatorVersion>=7 && e.kind==='villager' && playerInteractive && Math.abs(p.y-player.y)<1.5) {
+      if( e.kind==='villager' && playerInteractive && Math.abs(p.y-player.y)<1.5) {
         const agent=this.navigation.agents.get(e.id);
         for(let skip=0;agent && skip<4 && agent.index<agent.path.length-1;skip++) {
           const occupied=agent.path[agent.index],after=agent.path[agent.index+1];
@@ -347,7 +447,7 @@ export class Entities {
       }
       e.navStatus=this.navigation.agents.get(e.id)?.status;
       const dx=(next?.x ?? p.x)-p.x,dz=(next?.z ?? p.z)-p.z,len=Math.hypot(dx,dz);
-      const speed=chasing?2.4:following?1.9:e.kind==='panda'?.65:this.world.generatorVersion>=8&&e.kind==='villager'?this.life?.plan?.byId.get(e.id)?.circuit?.pace??1.5:1.5;
+      const speed=chasing?2.4:following?1.9:e.kind==='panda'?.65:e.kind==='villager'?this.life?.plan?.byId.get(e.id)?.circuit?.pace??1.5:1.5;
       if(chasing && distance(p,player)<1.5) {
         v.x=v.z=0;e.state='attack';
         if(e.cooldown<=0 && meleeSightBetween(this.world,p,player,1.4,1.1)){damage(3);e.cooldown=1.2;}
@@ -356,10 +456,15 @@ export class Entities {
         // Deterministic local yielding prevents two agents pushing indefinitely through one doorway.
         let crowded = false;
         const gx = Math.floor(p.x / 4), gz = Math.floor(p.z / 4);
-        for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++)
-          if ((localGrid.get(`${gx + dx},${gz + dz}`) ?? []).some(q => q !== e && q.id < e.id &&
-            Math.hypot(q.body.position.x - (p.x + v.x * .4), q.body.position.z - (p.z + v.z * .4)) < .55 && Math.abs(q.body.position.y - p.y) < 1)) crowded = true;
-        if(crowded) {v.x*=.1;v.z*=.1;}
+        for (let dz = -1; dz <= 1 && !crowded; dz++) for (let dx = -1; dx <= 1 && !crowded; dx++) {
+          const bin=this.localGrid.get(occupancyCellKey(gx+dx,gz+dz));
+          if(!bin)continue;
+          for(let i=0;i<bin.length;i++){
+            const q=bin[i];
+            if(q!==e&&shouldYieldToMovingActor(e.id,p,v,q.id,q.body.position,q.body.velocity)){crowded=true;break;}
+          }
+        }
+        if(crowded) {v.x*=.35;v.z*=.35;}
         if(e.kind==='villager') this.openNearbyDoors(p,next);
       } else {
         v.x=v.z=0;
@@ -380,8 +485,10 @@ export class Entities {
       v.y = Math.max(-20, v.y - 20 * dt);
       moveBody(this.world, e.body, dt, false, e.kind === "panda" ? 0.9 : 1.75);
     }
-    this.list = this.list.filter((e) => e.health > 0);
-    this.navigation.removeMissing(new Set(simulated.filter(e => e.health > 0).map(e=>e.id)));
+    this.flushPendingRemovals();
+    this.simulatedIds.clear();
+    for(const e of simulated)if(e.health>0)this.simulatedIds.add(e.id);
+    this.navigation.removeMissing(this.simulatedIds);
     this.navigation.tick();
     this.tickMs = performance.now() - tickStarted;
   }
@@ -394,12 +501,24 @@ export class Entities {
       if(idOf(ov)===B.Door)this.world.set(x,oy,z,packed(B.Door,stateOf(ov)|4));
     }
   }
+  canInteractWith(e: Entity, origin: Vec3, reach = 5) {
+    return e.health > 0 &&
+      this.renderActors().includes(e) &&
+      this.world.loaded(e.body.position.x,e.body.position.z) &&
+      distance(e.body.position,origin) < reach;
+  }
   target(origin: Vec3, dir: Vec3, reach = 4) {
     let best: Entity | null = null;
     let nearest = reach;
-    for (const e of this.list) {
-      if (e.health <= 0 || !this.world.loaded(e.body.position.x, e.body.position.z)) continue;
+    // Conservative swept-ray bounds reject distant residents before a chunk
+    // lookup or hitbox allocation. Exact hitboxes and tie order stay unchanged.
+    const maxX = Math.abs(dir.x * reach) + .5, maxY = Math.abs(dir.y * reach) + 1.8, maxZ = Math.abs(dir.z * reach) + .5;
+    // Target only actors eligible for the current render/simulation set.
+    // The full resident registry also contains inactive, non-physical schedule
+    // records that must not intercept interaction or combat rays.
+    for (const e of this.renderActors()) {
       const p = e.body.position;
+      if (e.health <= 0 || Math.abs(p.x-origin.x) > maxX || Math.abs(p.y-origin.y) > maxY || Math.abs(p.z-origin.z) > maxZ || !this.world.loaded(p.x, p.z)) continue;
       const halfWidth = e.kind === "panda" ? 0.47 : 0.36;
       const height = e.kind === "panda" ? 1.23 : 1.76;
       const hit = rayBoxDistance(origin, dir,
@@ -422,6 +541,7 @@ export class Entities {
       { ...e.body.position, y: e.body.position.y + 0.5 }))
       return { status: "blocked", damage: 0 };
     e.health = Math.max(0, e.health - amount);
+    if(killed)this.pendingRemoval?.add(e);
     const len = Math.hypot(dir.x, dir.z);
     if (len > 1e-5) {
       const strength = 3.0;
@@ -439,10 +559,14 @@ export class Entities {
   }
   dispose() {
     this.life?.dispose(); this.life = undefined; this.navigation.agents.clear(); this.list = []; this.drops = [];
+    this.residentEntities.length=0;this.otherActors.length=0;this.renderActorsBuffer.length=0;this.simulatedActorsBuffer.length=0;
+    this.entityById.clear();this.pendingRemoval.clear();this.occupantPositionsBuffer.length=0;this.occupantsDirty=true;
+    for(const bin of this.localGrid.values())bin.length=0;
+    this.localGrid.clear();this.localGridPool.length=0;this.threatBuffer.length=0;this.simulatedIds.clear();
   }
   serialize() {
     return {
-      ...(this.populationInitialized ? { cityLifeVersion: this.world.generatorVersion === 10 ? 5 : this.world.generatorVersion === 9 ? 4 : this.world.generatorVersion === 8 ? 3 : this.world.generatorVersion === 7 ? 2 : 1 } : {}),
+      ...(this.populationInitialized ? { cityLifeVersion: 5 } : {}),
       entities: structuredClone(this.list),
       drops: structuredClone(this.drops),
     };

@@ -35,6 +35,9 @@ test('Submenu from world creation returns to creation', () => {
 const Panel = method('src/ui/ui.ts', 'UI', 'panel');
 const ui = new Panel();
 ui.show=(screen,html)=>{ui.last={screen,html};};
+// UI.panel focuses the close control after a real dialog is mounted. This
+// isolated markup test has no DOM, so provide the smallest inert query surface.
+ui.overlay={querySelector:()=>null};
 test('Close button in Settings says Back and uses parent navigation',()=>{
   ui.panel('settings','Settings','Tune things','');
   assert.match(ui.last.html,/data-action="back"/);

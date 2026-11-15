@@ -38,4 +38,6 @@ export class AudioEngine {
     osc.start(t);
     osc.stop(t + 0.17);
   }
+  async dispose(){const context=this.context;this.context=undefined;if(context&&context.state!=="closed"){try{await context.close();}catch{/* Browser may already have closed the context. */}}}
+
 }

@@ -33,7 +33,7 @@ const REMOTE: Record<LandmarkId, [string, Profession, DistrictId]> = {
 /** Spatial assignments are resolved once. This never generates a column. */
 export function createPopulation(world: World): PopulationPlan | undefined {
   const urban = world.densityPlan?.baseUrban ?? world.metropolisPlan, landmarks = world.landmarkPlan;
-  if (world.generatorVersion < 6 || !urban || !landmarks) return;
+  if (!urban || !landmarks) return;
   const lots = [...urban.lots].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
   const nearest = (p: Vec3, choices = lots) => {
     let best: UrbanLot | undefined, score = Infinity;
@@ -104,7 +104,6 @@ export function createPopulation(world: World): PopulationPlan | undefined {
   }
   if (result.length > CITY_LIFE_BUDGET.residents) throw Error("Population budget exceeded");
   const population=addNeighborhoodPopulation(world, { residents: result, byId: new Map(result.map(r => [r.id, r])), spaces });
-  const regional=world.generatorVersion>=9?addRegionalLife(world,population):population;
-  return world.generatorVersion>=10?addPurposefulLife(world,regional):regional;
+  return addPurposefulLife(world,addRegionalLife(world,population));
 }
 function resultSlot(id: string, count: number) { let n = 0; for (const c of id) n = (Math.imul(n, 31) + c.charCodeAt(0)) >>> 0; return count ? n % count : 0; }

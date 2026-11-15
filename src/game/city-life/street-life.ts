@@ -7,7 +7,7 @@ import { inCity } from "../../world/city/plan";
 import { buildingPoint, PROFESSIONS, type Profession } from "../professions";
 import { identityHash } from "./schedules";
 import type { Circuit, Routine } from "./presence";
-import type { PopulationPlan, ResidentPlan } from "./population";
+import type { PopulationPlan } from "./population";
 
 export const STREET_LIFE_BUDGET={residents:4000,active:96,saveEntities:4096} as const;
 const near=(a:Vec3,b:Vec3)=>Math.hypot(a.x-b.x,a.z-b.z),cmp=(a:string,b:string)=>a<b?-1:a>b?1:0;

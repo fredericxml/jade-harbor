@@ -58,11 +58,23 @@ try {
   await page.locator("#world-name").fill("QA Jade Harbor");
   await page.locator('[data-action="create"]').click();
   await page.waitForFunction(() => window.__game?.active);
+  // Functional setup only: pause simulation during initial High meshing,
+  // retain the original scene-readiness condition, then resume normally.
+  // The separate live performance harness always keeps simulation running.
+  await page.evaluate(() => window.__game.pause());
+  // Keep the original full-scene assertion. Software High rendering may need
+  // longer than Playwright's 30s default; timing is measured separately.
   await page.waitForFunction(
     () =>
       window.__game.world.pending.size === 0 &&
       window.__game.view.groups.size > 65,
+    null,
+    { timeout: 180000 },
   );
+  console.log("CORE_WORLD_READY", await page.evaluate(() => ({groups:window.__game.view.groups.size,columns:window.__game.world.chunks.size,pending:window.__game.world.pending.size,dirty:window.__game.world.dirty.size})));
+  await page.evaluate(() => window.__game.resume(false));
+  await page.locator("canvas#game").click();
+  await page.waitForFunction(() => !!document.pointerLockElement);
   await page.waitForTimeout(500);
   assert(
     await page.evaluate(() => !!document.pointerLockElement),
@@ -70,12 +82,18 @@ try {
   );
   await page.screenshot({ path: "test-results/gameplay.png" });
   await page.setViewportSize({ width: 960, height: 600 });
-  const before = await page.evaluate(() => window.__game.body.position.z);
+  await page.waitForFunction(() => window.__game.view.camera.aspect === 960 / 600);
+  // Pointer-lock viewport changes can shift the current heading in headless
+  // Chromium. Verify actual forward movement relative to that heading.
+  const before = await page.evaluate(() => ({position:{...window.__game.body.position},yaw:window.__game.yaw}));
   await page.keyboard.down("KeyW");
-  await page.waitForTimeout(700);
+  await page.waitForFunction(({position,yaw}) => {
+    const p=window.__game.body.position;
+    return (p.x-position.x)*-Math.sin(yaw)+(p.z-position.z)*-Math.cos(yaw)>1;
+  }, before);
   await page.keyboard.up("KeyW");
-  const after = await page.evaluate(() => window.__game.body.position.z);
-  assert(after < before - 1, "W moves the player");
+  const after = await page.evaluate(() => ({...window.__game.body.position}));
+  assert((after.x-before.position.x)*-Math.sin(before.yaw)+(after.z-before.position.z)*-Math.cos(before.yaw)>1,"W moves the player forward");
   // Fixture points the camera at a nearby ground block; mining and placing use real mouse input.
   await page.mouse.move(480, 300);
   await page.waitForTimeout(200);
@@ -118,7 +136,7 @@ try {
   );
   await page.keyboard.press("KeyE");
   await page.getByPlaceholder("Find a block or item…").fill("lantern");
-  await page.getByRole("button", { name: "Festival lantern" }).click();
+  await page.locator("#catalog").getByRole("button", { name: "Festival lantern" }).click();
   assert.equal(
     await page.evaluate(() => window.__game.inventory.held.id),
     14,
@@ -199,7 +217,7 @@ try {
     "crafting UI produces a wooden pickaxe",
   );
   await page.screenshot({ path: "test-results/crafting.png" });
-  await page.getByRole("button", { name: "Close", exact: true }).click();
+  await page.locator('.dialog-head .close[data-action="resume"]').click();
   await page.waitForFunction(
     () => !!document.pointerLockElement && window.__game.input.locked,
   );
@@ -246,7 +264,7 @@ try {
     "kiln smelts ore and output is collectible",
   );
   await page.screenshot({ path: "test-results/kiln.png" });
-  await page.getByRole("button", { name: "Close", exact: true }).click();
+  await page.locator('.dialog-head .close[data-action="resume"]').click();
   await page.waitForFunction(
     () => !!document.pointerLockElement && window.__game.input.locked,
   );
@@ -279,7 +297,7 @@ try {
     "merchant consumes payment",
   );
   await page.screenshot({ path: "test-results/trading.png" });
-  await page.getByRole("button", { name: "Close", exact: true }).click();
+  await page.locator('.dialog-head .close[data-action="resume"]').click();
   await page.waitForFunction(
     () => !!document.pointerLockElement && window.__game.input.locked,
   );
@@ -324,7 +342,7 @@ try {
     "equipment slot provides protection",
   );
   await page.screenshot({ path: "test-results/equipment.png" });
-  await page.getByRole("button", { name: "Close", exact: true }).click();
+  await page.locator('.dialog-head .close[data-action="resume"]').click();
   await page.waitForFunction(
     () => !!document.pointerLockElement && window.__game.input.locked,
   );
@@ -456,6 +474,12 @@ try {
       const g = window.__game;
       return {
         tick: g?.tickCount,
+        groups: g?.view.groups.size,
+        sections: g?.view.sections.size,
+        columns: g?.world.chunks.size,
+        pending: g?.world.pending.size,
+        dirty: g?.world.dirty.size,
+        settings: g?.settings,
         progress: g?.mineProgress,
         key: g?.mineKey,
         hit: g?.hit,

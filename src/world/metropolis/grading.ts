@@ -6,13 +6,56 @@ import type { UrbanRoad } from "./plan";
 
 /** Split streets at shared junctions before grading them. The graph relaxation
  * limits grade to 0.45; quantized half-block surfaces remain walkable. Urban
- * terrace levels are defined by the original geographic plan. Outside town only the road ribbon changes. */
+ * terrace levels are fixed by the protected city plan. Outside town only the road ribbon changes. */
+type SegmentBounds = Readonly<{ minX:number; maxX:number; minZ:number; maxZ:number }>;
+type SegmentInput = Readonly<{ a:Point; b:Point }>;
+
+const overlapsBounds = (a:SegmentBounds,b:SegmentBounds) =>
+  a.minX <= b.maxX && a.maxX >= b.minX && a.minZ <= b.maxZ && a.maxZ >= b.minZ;
+
+/**
+ * Return every pair whose segment AABBs overlap. The grid is only a broad
+ * phase: exact line intersection remains in gradeRoads. Inclusive cell ranges
+ * intentionally retain endpoint/tile-boundary contacts.
+ */
+export function candidateSegmentPairs(segments:readonly SegmentInput[],cellSize=64):[number,number][] {
+  if(!Number.isFinite(cellSize)||cellSize<=0)throw new Error("Invalid segment index cell size");
+  const count=segments.length,bounds:SegmentBounds[]=segments.map(({a,b})=>({
+    minX:Math.min(a.x,b.x),maxX:Math.max(a.x,b.x),minZ:Math.min(a.z,b.z),maxZ:Math.max(a.z,b.z)
+  }));
+  const bins=new Map<string,number[]>(),longSegments:number[]=[],pairs:[number,number][]=[];
+  const maxCellsPerSegment=4096;
+  for(let i=0;i<count;i++){
+    const box=bounds[i],x0=Math.floor(box.minX/cellSize),x1=Math.floor(box.maxX/cellSize),
+      z0=Math.floor(box.minZ/cellSize),z1=Math.floor(box.maxZ/cellSize),cellCount=(x1-x0+1)*(z1-z0+1);
+    if(cellCount>maxCellsPerSegment){
+      // Avoid pathological memory growth for exceptionally long road segments.
+      for(let j=0;j<i;j++)if(overlapsBounds(box,bounds[j]))pairs.push([j,i]);
+      longSegments.push(i);
+      continue;
+    }
+    // Long segments are deliberately kept out of the grid, so test them once
+    // against each later short segment. This keeps indexing bounded.
+    for(const j of longSegments)if(overlapsBounds(box,bounds[j]))pairs.push([j,i]);
+    const seen=new Set<number>();
+    for(let z=z0;z<=z1;z++)for(let x=x0;x<=x1;x++){
+      const bucket=bins.get(`${x},${z}`);
+      if(bucket)for(const j of bucket){
+        if(seen.has(j)||!overlapsBounds(box,bounds[j]))continue;
+        seen.add(j);pairs.push([j,i]);
+      }
+      if(bucket)bucket.push(i);else bins.set(`${x},${z}`,[i]);
+    }
+  }
+  return pairs;
+}
+
 export function gradeRoads(m:MacroPlan,roads:UrbanRoad[]):UrbanRoad[]{
   type Segment={road:number;a:Point;b:Point;cuts:number[]};
   const segments:Segment[]=[];
   roads.forEach((r,road)=>r.points.slice(1).forEach((b,i)=>segments.push({road,a:r.points[i],b,cuts:[0,1]})));
   const cross=(ax:number,az:number,bx:number,bz:number)=>ax*bz-az*bx;
-  for(let i=0;i<segments.length;i++)for(let j=i+1;j<segments.length;j++){
+  for(const [i,j] of candidateSegmentPairs(segments)){
     const s=segments[i],t=segments[j],dx=s.b.x-s.a.x,dz=s.b.z-s.a.z,ex=t.b.x-t.a.x,ez=t.b.z-t.a.z,den=cross(dx,dz,ex,ez);
     if(Math.abs(den)<1e-8)continue;
     const qx=t.a.x-s.a.x,qz=t.a.z-s.a.z,u=cross(qx,qz,ex,ez)/den,v=cross(qx,qz,dx,dz)/den;

@@ -14,8 +14,19 @@ check('Creative flight restores while Survival does not', () => {
   for (const mode of ['survival', 'adventure', 'hardcore']) assert.equal(mode === 'spectator' || (mode === 'creative' && true), false);
 });
 check('G and double-Space creative flight toggles request persistence', () => {
-  assert.match(source, /now - this\.lastJump < 280[^]*?this\.body\.flying = !this\.body\.flying;\s*this\.scheduleSave\(\)/);
-  assert.match(source, /code === "KeyG" && this\.mode === "creative"\) \{\s*this\.body\.flying = !this\.body\.flying;\s*this\.scheduleSave\(\)/);
+ const ast=ts.createSourceFile('game.ts',source,ts.ScriptTarget.ES2022,true),cl=ast.statements.find(ts.isClassDeclaration);
+ const command=cl.members.find(m=>m.name?.getText(ast)==='command').getText(ast);
+ const gameJS=ts.transpileModule('class T{'+command+'}',{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
+ const Game=Function(gameJS+';return T')(),g=new Game();let saves=0,clock=1000;
+ Object.assign(g,{active:true,mode:'creative',ui:{screen:'none'},body:{flying:false},scheduleSave(){saves++;}});
+ const handlers=new Map(),doc={addEventListener:(k,fn)=>handlers.set(k,fn)},win={addEventListener(){}};
+ const js=require('esbuild').buildSync({entryPoints:['src/player/input.ts'],bundle:true,write:false,platform:'browser',format:'iife',globalName:'JadeInput',target:'es2022'}).outputFiles[0].text;
+ const Input=Function('document','window','performance','HTMLInputElement','HTMLSelectElement','HTMLTextAreaElement',js+';return JadeInput.Input')(doc,win,{now:()=>clock},class{},class{},class{});
+ const input=new Input({addEventListener(){}});input.onCommand=c=>g.command(c);
+ const press=code=>{handlers.get('keydown')({code,repeat:false,preventDefault(){}});handlers.get('keyup')({code});input.readTick();};
+ press('KeyG');assert.equal(g.body.flying,true);assert.equal(saves,1);
+ press('Space');clock+=200;press('Space');assert.equal(g.body.flying,false);assert.equal(saves,2);assert.equal(g.jumpRequest,true);
+ g.mode='survival';press('KeyG');clock+=100;press('Space');assert.equal(g.body.flying,false);assert.equal(saves,2);
 });
 check('Save schema includes validated optional boolean and initial flying state', () => {
   assert.match(saveSource, /flying\?: boolean;/);

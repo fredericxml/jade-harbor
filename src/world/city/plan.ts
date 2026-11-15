@@ -4,7 +4,6 @@ export const CITY_SPACING = 1024,
   CITY_RADIUS = 328,
   CITY_Y = 20;
 export const CITY_SPAWN = { x: 0.5, y: 21.1, z: 24.5 };
-export const PANDA = { x: 0, z: -48, base: 23 };
 export const DISTRICTS = [
   "Grand Lantern Avenue",
   "Residential Old Town",
@@ -81,7 +80,6 @@ const cache = new Map<string, CityPlan>();
 export function clearCityPlanCache(seed: number) {
   for (const key of cache.keys()) if (key.startsWith(`${seed}:`)) cache.delete(key);
 }
-export function cityPlanCacheSize() { return cache.size; }
 export function cityNear(x: number, z: number, seed: number): CityPlan | null {
   const ox = Math.round(x / CITY_SPACING) * CITY_SPACING,
     oz = Math.round(z / CITY_SPACING) * CITY_SPACING;
@@ -330,30 +328,4 @@ export function crossingAt(plan: CityPlan, z: number) {
 }
 export function parkAt(plan: CityPlan, x: number, z: number) {
   return plan.parks.some((r) => contains(r, x, z));
-}
-export function surfaceAt(
-  plan: CityPlan,
-  x: number,
-  z: number,
-): "water" | "road" | "plaza" | "building" | "garden" | "court" {
-  const lx = x - plan.ox,
-    lz = z - plan.oz;
-  if (canalAt(plan, x, z)) return crossingAt(plan, z) ? "road" : "water";
-  if (Math.abs(lx - 144) <= 8 && lz > -234 && lz < 144) return "road";
-  if (roadAt(plan, x, z, 2)) return "road";
-  for (const st of plan.byChunk.get(
-    `${Math.floor(x / 16)},${Math.floor(z / 16)}`,
-  ) ?? [])
-    if (contains(st, x, z))
-      return st.kind === "garden"
-        ? "garden"
-        : st.kind === "panda-plaza"
-          ? "plaza"
-          : "building";
-  if (plan.alleys.some((r) => contains(r, x, z))) return "road";
-  return parkAt(plan, x, z) ||
-    districtAt(lx, lz) === DISTRICTS[7] ||
-    hash(Math.floor(lx / 48), Math.floor(lz / 48), plan.seed + 901) < 0.12
-    ? "garden"
-    : "court";
 }

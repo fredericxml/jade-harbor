@@ -6,7 +6,6 @@ import { standAt } from "../navigation/pathfinder";
 export type Discovery = { id: string; title: string; description: string; position: Vec3; radius: number };
 const cell = (p: Vec3) => `${Math.floor(p.x / 32)},${Math.floor(p.z / 32)}`;
 export function discoveryRegistry(world: World): Discovery[] {
-  if(world.generatorVersion<6)return [];
   return journalPlaces(world).map(d=>({id:d.discoveryId,title:d.title,description:d.description,
     position:d.discoveryPosition,radius:d.discoveryRadius}));
 }

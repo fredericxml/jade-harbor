@@ -1,9 +1,10 @@
 /** Verify that a production directory is complete and unchanged since its fresh build. */
+import {validatePwa} from './build-pwa.mjs';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 
-const INPUT_PATHS = ['src', 'public', 'index.html', 'package.json', 'package-lock.json', 'tsconfig.json', 'vite.config.ts'];
+const INPUT_PATHS = ['src', 'public', 'index.html', 'package.json', 'package-lock.json', 'tsconfig.json', 'vite.config.ts','scripts/build-release.mjs','scripts/build-pwa.mjs','scripts/service-worker.js','scripts/generate-app-icons.mjs'];
 const MANIFEST = 'dist/release-integrity.json';
 const hash = buffer => createHash('sha256').update(buffer).digest('hex');
 
@@ -32,12 +33,12 @@ function records(root, paths) {
 }
 function canonical(list) {return JSON.stringify(list);}
 function has(array, value) {return array.includes(value);}
-function inspectOutput(root) {
+function inspectOutput(root,validate=true) {
   const dist=join(root,'dist');
   const index=join(dist,'index.html');
   const viteManifest=join(dist,'.vite','manifest.json');
   if (!existsSync(index)) throw new Error('Missing dist/index.html');
-  if (!existsSync(viteManifest)) throw new Error('Missing Vite build manifest: dist/.vite/manifest.json. Rebuild with npm run build; patched bundles are not verified.');
+  if (!existsSync(viteManifest)) throw new Error('Missing Vite build manifest: dist/.vite/manifest.json. Rebuild with npm run build; modified bundles are not verified.');
   const html=readFileSync(index,'utf8');
   if (/\bsrc=["']\/?src\/main\.ts["']/.test(html)) throw new Error('dist/index.html still loads the dev entry point');
   const assetRefs=[...html.matchAll(/\b(?:src|href)=["'](?:\.\/)?(assets\/[^"'#?]+)["']/g)].map(m=>m[1]);
@@ -53,6 +54,7 @@ function inspectOutput(root) {
   if (!distList.some(f=>/^assets\/generation\.worker-.*\.js$/.test(f))) throw new Error('Missing built terrain generation worker');
   for (const asset of assetRefs) if (!has(distList,asset)) throw new Error(`Missing HTML asset: dist/${asset}`);
   if (!has(distList,'.vite/manifest.json')) throw new Error('Vite manifest is missing from final dist file list');
+  if(validate)validatePwa(root);
   return outputPaths;
 }
 export function createReleaseManifest(root=process.cwd()) {
@@ -73,9 +75,10 @@ export function verifyReleaseManifest(root=process.cwd()) {
   const recorded=JSON.parse(readFileSync(file,'utf8'));
   if (recorded.schema!==1 || !Array.isArray(recorded.source) || !Array.isArray(recorded.dist)) throw new Error('Invalid release manifest schema');
   const actualSource=records(root,listFiles(root,INPUT_PATHS));
-  const actualDist=records(root,inspectOutput(root));
+  const actualDist=records(root,inspectOutput(root,false));
   if(canonical(recorded.source)!==canonical(actualSource))throw new Error('Source or build inputs changed after the production build; rebuild before release.');
   if(canonical(recorded.dist)!==canonical(actualDist))throw new Error('Production assets changed after the build or are incomplete; rebuild before release.');
+  validatePwa(root);
   const pkg=JSON.parse(readFileSync(join(root,'package.json'),'utf8'));
   if(recorded.project!==pkg.name || recorded.version!==pkg.version)throw new Error('Package version differs from build manifest');
   return {project:recorded.project,version:recorded.version,sourceFiles:actualSource.length,distFiles:actualDist.length};

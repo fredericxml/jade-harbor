@@ -2,8 +2,9 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const ts = require('typescript');
 const inputSrc = fs.readFileSync('src/player/input.ts','utf8');
-function extractedInput(text){
-  return ts.transpileModule(text.replace('export class Input','class g0'),{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText.replace('export {};','');
+function extractedInput(){
+ const js=require('esbuild').buildSync({entryPoints:['src/player/input.ts'],bundle:true,write:false,platform:'browser',format:'iife',globalName:'JadeInput',target:'es2022'}).outputFiles[0].text;
+ return js+';const g0=JadeInput.Input;';
 }
 function mockInput(js){
   const handlers=new Map(), canvasHandlers=new Map();
@@ -11,7 +12,7 @@ function mockInput(js){
   const oldPerformance=global.performance;
   const doc={pointerLockElement:null,addEventListener:(name,cb)=>handlers.set(name,cb),exitPointerLock(){this.pointerLockElement=null;queueMicrotask(()=>handlers.get('pointerlockchange')?.())}};
   const canvas={addEventListener:(name,cb)=>canvasHandlers.set(name,cb),requestPointerLock(){doc.pointerLockElement=canvas;queueMicrotask(()=>handlers.get('pointerlockchange')?.());return Promise.resolve();}};
-  const Class=Function('document','addEventListener','HTMLInputElement','HTMLSelectElement','HTMLTextAreaElement','performance',js+';return g0')(doc,()=>{},class {},class {},class {},{now:()=>clock});
+  const Class=Function('document','window','addEventListener','HTMLInputElement','HTMLSelectElement','HTMLTextAreaElement','performance',js+';return g0')(doc,{addEventListener(){},removeEventListener(){}},()=>{},class {},class {},class {},{now:()=>clock});
   const input=new Class(canvas);
   const tick=()=>new Promise(resolve=>setTimeout(resolve,110));
   const emitEscape=()=>handlers.get('keydown')({code:'Escape',repeat:false,preventDefault(){}});

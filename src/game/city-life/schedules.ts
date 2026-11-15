@@ -8,23 +8,35 @@ export type Schedule = { phase: SchedulePhase; activity: Activity; destination: 
 export const clockHour = (time: number) => ((time * 24 + 6) % 24 + 24) % 24;
 export function identityHash(id: string) { let n = 2166136261; for (const c of id) n = Math.imul(n ^ c.charCodeAt(0), 16777619); return n >>> 0; }
 export const scheduleOffset = (id: string) => (identityHash(id) % 901 - 450) / 1000;
-export function scheduleAt(id: string, profession: Profession, district: DistrictId, time: number, rain = false): Schedule {
-  const h = (clockHour(time) + scheduleOffset(id) + 24) % 24;
+export type MutableSchedule = { phase: SchedulePhase; activity: Activity; destination?: Schedule["destination"] };
+export function scheduleAtInto(out: MutableSchedule, id: string, profession: Profession, district: DistrictId,
+  time: number, rain = false, offset = scheduleOffset(id), hour = clockHour(time)): MutableSchedule {
+  const h = (hour + offset + 24) % 24;
   const phase: SchedulePhase = h < 6 || h >= 21 ? "night" : h < 8 ? "dawn" : h < 12 ? "morning" : h < 14 ? "midday" : h < 17 ? "afternoon" : "evening";
-  if (profession === "guard") return { phase, activity: "guarding", destination: "work" };
-  if (profession === "fisherman" || profession === "dock_worker") {
-    if (h >= 5 && h < 17) return { phase, activity: "working", destination: "work" };
-    return { phase, activity: h < 5 || h >= 21 ? "sleeping" : "returning home", destination: "home" };
-  }
-  if (district === "nightlife" || profession === "chef") {
-    if (h >= 11 && h < 23) return { phase, activity: h >= 17 && !rain ? "gathering" : "working", destination: h >= 17 && !rain ? "public" : "work" };
-    return { phase, activity: "sleeping", destination: "home" };
-  }
-  if (phase === "night") return { phase, activity: "sleeping", destination: "home" };
-  if (phase === "dawn") return { phase, activity: "resting", destination: "home" };
-  if (phase === "evening") return rain || district === "imperial" || h >= 19.5
-    ? { phase, activity: "returning home", destination: "home" }
-    : { phase, activity: "gathering", destination: "public" };
-  if (phase === "midday" && !rain) return { phase, activity: profession === "scholar" || profession === "caretaker" ? "sightseeing" : "browsing", destination: "public" };
-  return { phase, activity: "working", destination: "work" };
+  let activity: Activity, destination: Schedule["destination"];
+  if (profession === "guard") { activity = "guarding"; destination = "work"; }
+  else if (profession === "fisherman" || profession === "dock_worker") {
+    if (h >= 5 && h < 17) { activity = "working"; destination = "work"; }
+    else { activity = h < 5 || h >= 21 ? "sleeping" : "returning home"; destination = "home"; }
+  } else if (district === "nightlife" || profession === "chef") {
+    if (h >= 11 && h < 23) {
+      activity = h >= 17 && !rain ? "gathering" : "working";
+      destination = h >= 17 && !rain ? "public" : "work";
+    } else { activity = "sleeping"; destination = "home"; }
+  } else if (phase === "night") { activity = "sleeping"; destination = "home"; }
+  else if (phase === "dawn") { activity = "resting"; destination = "home"; }
+  else if (phase === "evening") {
+    if (rain || district === "imperial" || h >= 19.5) { activity = "returning home"; destination = "home"; }
+    else { activity = "gathering"; destination = "public"; }
+  } else if (phase === "midday" && !rain) {
+    activity = profession === "scholar" || profession === "caretaker" ? "sightseeing" : "browsing";
+    destination = "public";
+  } else { activity = "working"; destination = "work"; }
+  out.phase = phase; out.activity = activity; out.destination = destination;
+  return out;
+}
+export function scheduleAt(id: string, profession: Profession, district: DistrictId, time: number, rain = false): Schedule {
+  const out: Schedule = { phase: "dawn", activity: "resting", destination: "home" };
+  scheduleAtInto(out, id, profession, district, time, rain);
+  return out;
 }

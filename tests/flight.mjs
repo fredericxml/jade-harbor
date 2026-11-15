@@ -36,7 +36,7 @@ try {
   );
   await page.keyboard.press("Escape");
   await page.locator("#change-mode").selectOption("spectator");
-  await page.getByRole("button", { name: "Return to world" }).click();
+  await page.locator('[data-action="resume"].primary').click();
   await page.waitForFunction(
     () => window.__game.mode === "spectator" && window.__game.input.locked,
   );

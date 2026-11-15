@@ -33,7 +33,7 @@ for (const file of sourceFiles) {
 }
 assert.deepEqual(violations, [], `Language/brand verification:\n${violations.join('\n')}`);
 const ui = read('src/ui/ui.ts');
-assert(ui.includes(`JADE HARBOR · v${version}`), 'Menu version does not match package');
+assert(ui.includes('JADE HARBOR · v${appVersion}') && ui.includes('import { version as appVersion } from "../../package.json"'), 'Menu must derive its version from package.json');
 assert(!ui.includes('Engine save version 1'), 'Save schema details leaked into UI');
 assert(ui.includes('Saved locally in this browser.'), 'Expected friendly save copy');
 assert(ui.includes('toLocaleDateString("en-US"'), 'Dates must display English month names');

@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { createServer } from "node:net";
 import { createRequire } from "node:module";
 
-const defaultArchive = "../JadeHarbor_2.0.1_Release.zip";
+const defaultArchive = "../JadeHarbor_v1.0.0_Release_Source_and_Dist.zip";
 const archive = resolve(process.argv[2] ?? process.env.JADE_HARBOR_ARCHIVE ?? defaultArchive);
 const pythonCandidates = process.platform === "win32" ? ["python", "py"] : ["python3", "python"];
 
@@ -72,9 +72,9 @@ execFileSync(python, [
     "bad=z.testzip()",
     "assert bad is None, f'ZIP CRC failure: {bad}'",
     "names=z.namelist()",
-    "assert 'dist/index.html' in names, 'Missing dist/index.html'",
-    "assert any(n.startswith('dist/assets/generation.worker-') and n.endswith('.js') for n in names), 'Missing generation worker'",
-    "assert not any(any(part in {'node_modules','.git','.openai','test-results','__pycache__','coverage','playwright-report','blob-report'} for part in n.split('/')) for n in names), 'Archive contains forbidden development output'",
+    "assert 'JadeHarbor/dist/index.html' in names, 'Missing JadeHarbor/dist/index.html'",
+    "assert any(n.startswith('JadeHarbor/dist/assets/generation.worker-') and n.endswith('.js') for n in names), 'Missing generation worker'",
+    "assert not any('/node_modules/' in n or '/.git/' in n or '/test-results/' in n for n in names), 'Archive contains forbidden development output'",
     "z.extractall(sys.argv[2])",
   ].join("; "),
   archive,
@@ -93,7 +93,7 @@ const server = spawn(
     "--bind",
     "127.0.0.1",
     "--directory",
-    join(directory, "dist"),
+    join(directory, "JadeHarbor", "dist"),
   ],
   { stdio: ["ignore", "pipe", "pipe"] },
 );

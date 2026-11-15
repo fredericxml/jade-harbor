@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { clamp } from "../core/coords";
+import { SKY_FRAGMENT_SHADER, SKY_VERTEX_SHADER } from "./shader-quality";
 
 // The game clock starts at 06:00. Colors are converted to linear space once.
 const frames = [
@@ -59,11 +60,8 @@ export class Atmosphere {
 
 export function makeSky(atmosphere:Atmosphere) {
   const material=new THREE.ShaderMaterial({side:THREE.BackSide,depthWrite:false,depthTest:false,
-    uniforms:{zenith:{value:atmosphere.zenith},horizon:{value:atmosphere.horizon},sunDirection:{value:atmosphere.sunDirection},sunVisibility:{value:1}},
-    vertexShader:`varying vec3 vDirection;void main(){vDirection=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`,
-    fragmentShader:`uniform vec3 zenith;uniform vec3 horizon;uniform vec3 sunDirection;uniform float sunVisibility;varying vec3 vDirection;
-void main(){vec3 d=normalize(vDirection);vec3 c=mix(horizon,zenith,smoothstep(-.08,.72,d.y));float disk=smoothstep(.9988,.9995,dot(d,sunDirection))*sunVisibility;c+=vec3(.65,.48,.25)*disk;gl_FragColor=vec4(c,1.);
-#include <colorspace_fragment>
-}`});
+    uniforms:{zenith:{value:atmosphere.zenith},horizon:{value:atmosphere.horizon},sunDirection:{value:atmosphere.sunDirection},sunVisibility:{value:1},qualityLevel:{value:1}},
+    vertexShader:SKY_VERTEX_SHADER,
+    fragmentShader:SKY_FRAGMENT_SHADER});
   const mesh=new THREE.Mesh(new THREE.SphereGeometry(800,24,12),material);mesh.frustumCulled=false;mesh.renderOrder=-1000;return mesh;
 }

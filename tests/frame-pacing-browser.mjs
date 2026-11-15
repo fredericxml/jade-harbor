@@ -1,0 +1,41 @@
+import {chromium} from 'playwright';
+import assert from 'node:assert/strict';
+import {mkdir,readFile,writeFile} from 'node:fs/promises';
+import {createHash} from 'node:crypto';
+import {devApp,chromiumArgs} from './browser-harness.mjs';
+import {verifyReleaseManifest} from '../scripts/release-integrity.mjs';
+verifyReleaseManifest();
+const out=process.env.PACING_BROWSER_OUTPUT??'test-results/frame-pacing';await mkdir(out,{recursive:true});
+const source=createHash('sha256').update(JSON.stringify(JSON.parse(await readFile('dist/release-integrity.json','utf8')).source)).digest('hex');
+const server=await devApp(4286);let browser,page;const checks=[],errors=[],observations={};
+try{
+ browser=await chromium.launch({headless:true,args:chromiumArgs});page=await browser.newPage({viewport:{width:640,height:360}});page.setDefaultTimeout(180000);page.on('pageerror',e=>errors.push(e.message));
+ await page.addInitScript(()=>localStorage.setItem('jade-harbor-settings',JSON.stringify({graphicsQuality:'low',distance:3,simulationDistance:4})));
+ await page.goto(server.url);await page.waitForFunction(()=>!!window.__game);
+ await page.evaluate(async()=>{const g=window.__game,{freshWorld}=await import('/src/persistence/saves.ts');await g.start(freshWorld('Frame pacing regression','jade-harbor','creative'));g.pause();});
+ await page.waitForFunction(()=>{const g=window.__game;return!g.opening&&!g.saveTask&&!g.world.pending.size&&!g.world.dirty.size&&!g.lighting.pending&&g.view.distant.stats.ready;});
+ await page.evaluate(()=>{const g=window.__game,probe={renders:0,callbacks:0,duplicates:0,timestamps:new Set()},draw=g.view.render,frame=g.frame;window.__pacingProbe=probe;g.view.render=function(...args){probe.renders++;return draw.apply(this,args);};g.frame=function(t){probe.callbacks++;if(probe.timestamps.has(t))probe.duplicates++;probe.timestamps.add(t);if(probe.timestamps.size>512)probe.timestamps.delete(probe.timestamps.values().next().value);return frame.call(this,t);};});
+ const before=await page.evaluate(()=>({renders:window.__pacingProbe.renders,tick:window.__game.tickCount}));await page.waitForTimeout(3000);
+ observations.pause=await page.evaluate(b=>({renders:window.__pacingProbe.renders-b.renders,ticks:window.__game.tickCount-b.tick,callbacks:window.__pacingProbe.callbacks}),before);
+ assert(observations.pause.renders>=4&&observations.pause.renders<=8,JSON.stringify(observations.pause));assert.equal(observations.pause.ticks,0);
+ checks.push('settled Pause renders about twice per second while simulation stays paused and the original input RAF remains responsive');
+ await page.setViewportSize({width:720,height:400});await page.waitForFunction(()=>{const g=window.__game;return g.view.canvas.width===Math.floor(720*.7)&&g.view.canvas.height===Math.floor(400*.7)&&g.view.camera.aspect===1.8;});
+ checks.push('paused viewport resize immediately updates the existing Low buffer and camera aspect');
+ await page.evaluate(()=>{window.__hiddenDescriptor=Object.getOwnPropertyDescriptor(document,'hidden');Object.defineProperty(document,'hidden',{configurable:true,value:true});document.dispatchEvent(new Event('visibilitychange'));});
+ const hidden=await page.evaluate(()=>({renders:window.__pacingProbe.renders,tick:window.__game.tickCount}));await page.waitForTimeout(800);
+ observations.hidden=await page.evaluate(b=>({renders:window.__pacingProbe.renders-b.renders,ticks:window.__game.tickCount-b.tick,held:window.__game.input.held('primary')}),hidden);
+ assert.deepEqual(observations.hidden,{renders:0,ticks:0,held:false});
+ await page.evaluate(()=>{if(window.__hiddenDescriptor)Object.defineProperty(document,'hidden',window.__hiddenDescriptor);else delete document.hidden;document.dispatchEvent(new Event('visibilitychange'));window.dispatchEvent(new Event('focus'));});
+ assert.equal(await page.evaluate(()=>window.__game.ui.screen),'pause');
+ checks.push('labelled visibility fixture performs no hidden rendering or simulation and restores paused without held input');
+ const start=await page.evaluate(()=>{const g=window.__game;g.resume(false);return g.tickCount;});await page.waitForTimeout(1200);
+ observations.resume=await page.evaluate(b=>({ticks:window.__game.tickCount-b,screen:window.__game.ui.screen,duplicates:window.__pacingProbe.duplicates}),start);
+ assert(observations.resume.ticks>=17&&observations.resume.ticks<=27,JSON.stringify(observations.resume));assert.equal(observations.resume.duplicates,0);assert.equal(observations.resume.screen,'none');
+ checks.push('explicit Resume advances ordinary 20Hz fixed simulation without replaying hidden time or creating duplicate frame callbacks');
+ await page.evaluate(()=>{const g=window.__game;window.__lose=g.view.renderer.getContext().getExtension('WEBGL_lose_context');if(!window.__lose)throw Error('Native context-loss extension missing');window.__lose.loseContext();});
+ await page.waitForFunction(()=>window.__game.view.contextLost);const loss=await page.evaluate(()=>window.__pacingProbe.renders);await page.waitForTimeout(500);assert.equal(await page.evaluate(()=>window.__pacingProbe.renders),loss);
+ await page.evaluate(()=>window.__lose.restoreContext());await page.waitForFunction(()=>!window.__game.view.contextLost&&window.__game.view.sections.size>0);assert.equal(await page.evaluate(()=>window.__game.ui.screen),'pause');assert.equal(await page.evaluate(()=>window.__game.settings.graphicsQuality),'low');
+ checks.push('native WebGL loss stops render submissions and restoration rebuilds the existing world while remaining paused');
+ assert.deepEqual(errors,[]);verifyReleaseManifest();await writeFile(out+'/results.json',JSON.stringify({status:'passed',source,browser:browser.version(),checks,observations,errors,note:'Native Chromium timing/layout/context lifecycle; hidden property is an explicitly labelled fixture, not physical OS suspension.'},null,2));console.log('FRAME PACING BROWSER PASSED',checks.length);
+}catch(error){await page?.screenshot({path:out+'/failure.png'}).catch(()=>{});await writeFile(out+'/failure.json',JSON.stringify({error:String(error),source,checks,observations,errors},null,2));throw error;}
+finally{await browser?.close();await server.close();}

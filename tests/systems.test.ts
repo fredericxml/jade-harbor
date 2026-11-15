@@ -2,7 +2,7 @@ import { BlockColumn } from "../src/world/sections";
 import { beforeEach,afterEach,describe,it,expect } from "vitest";
 import { World } from "../src/world/world";
 import { B } from "../src/world/blocks";
-import { packed, index, stateOf, idOf, blockKey } from "../src/core/coords";
+import { packed, stateOf, idOf } from "../src/core/coords";
 import { Simulation, Furnace, tickFurnace } from "../src/game/simulation";
 import { Entities, spawnEntity } from "../src/game/entities";
 import { Inventory } from "../src/game/inventory";
@@ -269,7 +269,6 @@ import { validateSave, SaveData } from "../src/persistence/saves";
 describe("complete save validation", () => {
   const valid = (): SaveData => ({
     version: 1,
-    generator: 3,
     format: "jade-harbor-engine",
     id: "validation",
     name: "test",

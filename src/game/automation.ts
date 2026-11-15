@@ -70,4 +70,12 @@ export class Automation {
     }
     this.cursor=(this.cursor+64)%Math.max(1,keys.length);
   }
+  dispose(){
+    this.drops.length=0;
+    for(const key of Object.keys(this.hoppers))delete this.hoppers[key];
+    for(const key of Object.keys(this.containers))delete this.containers[key];
+    for(const key of Object.keys(this.furnaces))delete this.furnaces[key];
+    this.cursor=0;
+  }
+
 }

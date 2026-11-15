@@ -5,30 +5,13 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createReleaseManifest, verifyReleaseManifest } from '../scripts/release-integrity.mjs';
 
-function fixture() {
-  const root=mkdtempSync(join(tmpdir(),'jade-release-'));
-  const put=(relative,body)=>{const p=join(root,relative);mkdirSync(join(p,'..'),{recursive:true});writeFileSync(p,body);};
-  const pkg={name:'jade-harbor',version:'1.0.0'};
-  put('package.json',JSON.stringify(pkg));
-  put('package-lock.json',JSON.stringify({...pkg,packages:{'':pkg}}));
-  put('tsconfig.json','{}');
-  put('vite.config.ts','export default {}');
-  put('index.html','<div id="app"></div>');
-  put('src/main.ts','console.log("Jade Harbor")');
-  put('public/favicon.svg','<svg/>');
-  put('dist/index.html','<script type="module" src="./assets/index-AbCd1234.js"></script><link rel="stylesheet" href="./assets/index-EfGh5678.css">');
-  put('dist/assets/index-AbCd1234.js','console.log("production")');
-  put('dist/assets/index-EfGh5678.css','body{}');
-  put('dist/assets/generation.worker-MnOp3456.js','onmessage=()=>{}');
-  put('dist/.vite/manifest.json',JSON.stringify({'index.html':{file:'assets/index-AbCd1234.js',css:['assets/index-EfGh5678.css'],isEntry:true}}));
-  return {root,put};
-}
+import {fixture} from './fixtures/release-pwa.mjs';
 function withFixture(fn) {const f=fixture();try{fn(f);}finally{rmSync(f.root,{recursive:true,force:true});}}
 
 test('fresh source and dist can be signed and verified',()=>withFixture(({root})=>{
   const manifest=createReleaseManifest(root);
   assert.equal(manifest.project,'jade-harbor');
-  assert.equal(verifyReleaseManifest(root).sourceFiles,7);
+  assert.equal(verifyReleaseManifest(root).sourceFiles,16);
 }));
 test('unsigned bundles are rejected even if they look playable',()=>withFixture(({root})=>{
   assert.throws(()=>verifyReleaseManifest(root),/Unverified dist/);

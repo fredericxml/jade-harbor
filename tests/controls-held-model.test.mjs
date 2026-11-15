@@ -18,7 +18,7 @@ function compiledMethod(file, className, methodName, bindings = {}) {
 }
 
 // Player can toggle pause on Escape; subdialogs return to pause instead of losing state.
-const GameKey = compiledMethod('src/core/game.ts','Game','key');
+const GameKey = compiledMethod('src/core/game.ts','Game','command');
 const game = new GameKey();
 const GameBack = compiledMethod('src/core/game.ts','Game','backToPreviousScreen');
 game.backToPreviousScreen = GameBack.prototype.backToPreviousScreen.bind(game);
@@ -30,15 +30,15 @@ game.inventory = {selected:0, held:null};
 game.pause = ()=>{game.ui.screen='pause';calls.push('pause')};
 game.resume = ()=>{game.ui.screen='none';calls.push('resume')};
 game.showDeath=()=>calls.push('death');
-game.key('Escape');
+game.command({action:'pause',value:0});
 assert.deepEqual(calls,['pause']);
-game.key('Escape');
+game.command({action:'pause',value:0});
 assert.deepEqual(calls,['pause','resume']);
-game.ui.screen = 'settings';game.key('Escape');
+game.ui.screen = 'settings';game.command({action:'pause',value:0});
 assert.equal(game.ui.screen,'pause');
-game.ui.screen = 'inventory';game.key('Escape');
+game.ui.screen = 'inventory';game.command({action:'pause',value:0});
 assert.equal(game.ui.screen,'none');
-game.ui.screen = 'pause';game.key('Digit2');
+game.ui.screen = 'pause';game.command({action:'hotbarSelect',value:1});
 assert.equal(game.inventory.selected,0,'number keys do not modify hotbar behind Pause');
 console.log('PASS Escape pause toggle, settings return, inventory close, no pause hotkeys');
 

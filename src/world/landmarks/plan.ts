@@ -7,7 +7,7 @@ import { sampleTerrain } from "../geography/terrain";
 import { nearestRoadPoint, roadElevation, type UrbanPlan } from "../metropolis/plan";
 import { GARDEN, HARBOR, IMPERIAL, LANDMARK_REGISTRY, STONE } from "./registry";
 import { gradeTrail, ridgeProfile, terrainWaypoints } from "./routes";
-import type { Approach, Component, Hall, LandmarkId, LandmarkInstance, Palette, Position, RealizationPlan, RouteNode } from "./types";
+import type { Approach, Component, Hall, LandmarkId, LandmarkInstance, Palette, Position, RealizationPlan } from "./types";
 
 const rect = (x1: number, z1: number, x2: number, z2: number): Rect => ({ x1, z1, x2, z2 });
 const area = (bounds: Rect): Footprint => ({ kind: "area", bounds });
@@ -15,7 +15,7 @@ const circle = (x: number, z: number, radius: number): Footprint => ({ kind: "po
 const expand = (r: Rect, pad: number): Rect => ({ x1: r.x1 - pad, x2: r.x2 + pad, z1: r.z1 - pad, z2: r.z2 + pad });
 const position = (x: number, y: number, z: number): Position => ({ x, y, z });
 
-/** Consumes the already-resolved geographic reservation plan. No candidate search, extra
+/** Uses the resolved landmark reservations. No candidate search, extra
  * reservation ownership or eager voxel construction is introduced here. */
 export function createRealizationPlan(m: MacroPlan, reservations: LandmarkPlan, urban: UrbanPlan): RealizationPlan {
   const components: Component[] = [], sites: LandmarkInstance[] = [], approaches: Approach[] = [];

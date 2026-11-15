@@ -1,7 +1,6 @@
 export const CHUNK = 16;
 export const MIN_Y = -64;
 export const MAX_Y = 319;
-export const HEIGHT = MAX_Y - MIN_Y + 1;
 export const MIN_SECTION = -4;
 export const MAX_SECTION = 19;
 export const sectionKey = (cx:number, sy:number, cz:number) => `${cx},${sy},${cz}`;

@@ -43,7 +43,7 @@ try {
   });
   await page.goto(process.env.PRODUCTION_URL ?? "http://127.0.0.1:4175");
   await page.locator('[data-action="settings"]').click();
-  assert.equal(await page.locator('#graphicsQuality').inputValue(),"medium","fresh production uses balanced quality");
+  assert.equal(await page.locator('#graphicsQuality').inputValue(),"high","fresh production preserves the accepted High default");
   for(const quality of["high","medium","low","medium"]){
     await page.selectOption('#graphicsQuality',quality);
     await page.waitForFunction(q=>{const c=document.querySelector('canvas'),cap={high:1.6,medium:1.25,low:1}[q],scale={high:1,medium:.88,low:.7}[q],ratio=Math.min(devicePixelRatio,Math.max(.25,Math.min(devicePixelRatio,cap)*scale));return c.width===Math.floor(innerWidth*ratio)&&c.height===Math.floor(innerHeight*ratio);},quality);

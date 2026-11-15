@@ -23,7 +23,7 @@ function compiledMethod(path, className, methodName, bindings = {}) {
   return Function(...Object.keys(bindings), `${built.outputText};return TestClass;`)(...Object.values(bindings));
 }
 
-// The original bug: replacing inventory HTML reset both scrolling containers.
+// Preserve the accepted single-dialog scroll model across inventory redraws.
 const UI = compiledMethod('src/ui/ui.ts', 'UI', 'inventory', {
   item: id => ({ name: id === 2 ? 'Jade roof' : 'Empty' }),
   esc: x => String(x),
@@ -36,7 +36,8 @@ ui.screen = 'inventory';
 ui.catalog = () => '<button>Sample block</button>';
 ui.overlay = {
   nodes: {
-    '.inventory-scroll-area': { scrollTop: 510 },
+    '.inventory-dialog': { scrollTop: 510 },
+    '.inventory-scroll-area': { scrollTop: 0 },
     '#catalog': { scrollTop: 175 },
     '.categories': { scrollLeft: 90 },
   },
@@ -45,6 +46,7 @@ ui.overlay = {
 ui.panel = (screen, title, subtitle, html) => {
   ui.lastHTML = html;
   ui.overlay.nodes = {
+    '.inventory-dialog': { scrollTop: 0 },
     '.inventory-scroll-area': { scrollTop: 0 },
     '#catalog': { scrollTop: 0 },
     '.categories': { scrollLeft: 0 },
@@ -54,7 +56,8 @@ ui.panel = (screen, title, subtitle, html) => {
 const inventory = { selected: 2, held: { id: 2 }, cursor: null,
   equipment: { slots: [null,null,null,null], protection: 0 }, slots: Array(36).fill(null) };
 ui.inventory(inventory, true);
-assert.equal(ui.overlay.querySelector('.inventory-scroll-area').scrollTop, 510);
+assert.equal(ui.overlay.querySelector('.inventory-dialog').scrollTop, 510);
+assert.equal(ui.overlay.querySelector('.inventory-scroll-area').scrollTop, 0);
 assert.equal(ui.overlay.querySelector('#catalog').scrollTop, 175);
 assert.equal(ui.overlay.querySelector('.categories').scrollLeft, 90);
 assert.match(ui.lastHTML, /Selected: 3 · Jade roof/);
@@ -64,7 +67,7 @@ assert.match(ui.lastHTML, /class="inventory-hotbar-dock"/);
 console.log('PASS creative inventory scroll preservation and selected-slot highlight');
 
 // Digit selection remains active inside the inventory overlay.
-const GameKey = compiledMethod('src/core/game.ts', 'Game', 'key');
+const GameKey = compiledMethod('src/core/game.ts', 'Game', 'command');
 const game = new GameKey();
 let renders = 0, saves = 0;
 game.inventory = { selected: 0 };
@@ -72,7 +75,7 @@ game.active = true;
 game.ui = { screen: 'inventory', inventory: () => renders++ };
 game.mode = 'creative'; game.category = 'All'; game.query = '';
 game.scheduleSave = () => saves++;
-game.key('Digit3');
+game.command({action:'hotbarSelect',value:2});
 assert.equal(game.inventory.selected, 2);
 assert.equal(renders, 1);
 assert.equal(saves, 1);

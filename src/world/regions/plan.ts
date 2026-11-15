@@ -1,6 +1,5 @@
 import {createLandscapeProgram,type LandscapeProgram} from "./landscapes";
 import { B } from "../blocks";
-import { hash } from "../noise";
 import { footprintBounds, footprintDistance, footprintsOverlap, type Point } from "../geography/geometry";
 import { protections, resolveReservations, type LandmarkRequest, type Reservation, type Protection } from "../geography/landmarks";
 import { sampleTerrain } from "../geography/terrain";
@@ -24,7 +23,6 @@ const specs=[
   {id:"lotus-causeway",name:"Lotus Causeway Gardens",description:"A southern lake garden, planted banks, low pavilions and crossing causeways.",x:-105,z:560,rx:63,rz:51},
 ] as const;
 const rect=(x:number,z:number,rx:number,rz:number):Rect=>({x1:x-rx,x2:x+rx,z1:z-rz,z2:z+rz});
-const inside=(r:Rect,x:number,z:number,p=0)=>x>=r.x1-p&&x<=r.x2+p&&z>=r.z1-p&&z<=r.z2+p;
 
 /** New regions reserve existing low-value space before realizing any voxel.
  * Existing city, river, mines, landmarks, approaches and lot envelopes win.

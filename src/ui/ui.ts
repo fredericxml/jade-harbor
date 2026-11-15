@@ -1,3 +1,4 @@
+import { version as appVersion } from "../../package.json";
 import {GRAPHICS_QUALITIES,GRAPHICS_PROFILES,graphicsQuality,type GraphicsQuality} from "../render/graphics";
 import { ENCHANTMENTS } from "../game/progression";
 import { ARMOR_SLOTS } from "../game/equipment";
@@ -6,6 +7,7 @@ import { RECIPES } from "../game/inventory";
 import type { Inventory } from "../game/inventory";
 import type { Enchantment, Stack } from "../game/stack";
 import type { Mode, SaveSummary } from "../persistence/saves";
+import { TouchControls, touchMode, touchSensitivity, type TouchInputPort, type TouchMode } from "./touch-controls";
 
 const BRAND_MARK_SVG = '<svg viewBox="0 0 24 32" width="22" height="30" aria-hidden="true"><path fill="currentColor" d="M7 1h10v3H7zM5 6h14l3 5v11l-4 4H6l-4-4V11zM7 28h10v2H7zM11 30h2v2h-2z"/><path d="M9 7v18m6-18V7" stroke="#f2dba8" stroke-width="1" fill="none"/></svg>';
 const CONTEXT_SLOT_ACTIONS = new Set([
@@ -157,61 +159,98 @@ export type Screen =
   | "enchant"
   | "brew"
   | "anvil"
+  | "browser"
+  | "conflict"
   | "journal"
   | "trade"
   | "death";
 export class UI {
+  onPresentationChange?:()=>void;
   root: HTMLElement;
   overlay: HTMLElement;
   hud: HTMLElement;
   toastEl: HTMLElement;
   saveStatusEl: HTMLElement;
+  performanceAdvisorEl: HTMLElement;
+  private toastTimer?: number;
   screen: Screen = "menu";
+  pointerType = "mouse";
+  touchControls?: TouchControls;
+  private removers:Array<()=>void>=[];
+  private disposed=false;
+  onScreenChange?: (screen:Screen)=>void;
   onAction?: (action: string, button: HTMLElement, event: MouseEvent) => void;
   onMove?: (fromAction: string, fromIndex: number, toAction: string, toIndex: number) => void;
   onChange?: (el: HTMLInputElement | HTMLSelectElement) => void;
   onSearch?: () => void;
+  onPerformanceAction?: (action: "lower" | "keep") => void;
   constructor(root: HTMLElement) {
     this.root = root;
     root.innerHTML = [
       '<canvas id="game" aria-label="Jade Harbor voxel world"></canvas>',
       '<div id="vignette"></div>',
       '<div id="hud" hidden></div>',
+      '<div id="touch-controls" hidden aria-label="Touch gameplay controls"></div>',
       '<div id="overlay"></div>',
-      '<div id="toast" role="status"></div>',
+      '<div id="toast" role="status" aria-live="polite"></div>',
       '<div id="save-status" aria-live="polite"></div>',
+      '<aside id="performance-advisor" aria-label="Graphics performance recommendation" hidden></aside>',
     ].join("");
     this.overlay = root.querySelector("#overlay")!;
     this.hud = root.querySelector("#hud")!;
     this.toastEl = root.querySelector("#toast")!;
     this.saveStatusEl = root.querySelector("#save-status")!;
-    this.overlay.addEventListener("click", (e) => {
+    this.performanceAdvisorEl = root.querySelector("#performance-advisor")!;
+    this.listen(root,"pointerdown", e => { if (["mouse", "touch", "pen"].includes((e as PointerEvent).pointerType)) this.pointerType = (e as PointerEvent).pointerType; }, true);
+    this.listen(root,"click", e => {
+      const target = e.target instanceof Element ? e.target.closest<HTMLButtonElement>("[data-performance-action]") : null;
+      if (!target || target.disabled) return;
+      e.preventDefault(); e.stopPropagation();
+      const action = target.dataset.performanceAction;
+      if (action === "lower" || action === "keep") this.onPerformanceAction?.(action);
+    });
+    this.listen(this.overlay,"click", (e) => {
       const target = (e.target as HTMLElement).closest<HTMLElement>(
         "[data-action]",
       );
       if (target)
         this.onAction?.(target.dataset.action!, target, e as MouseEvent);
     });
-    this.overlay.addEventListener("contextmenu", (e) => {
+    this.listen(this.overlay,"keydown", e => {
+      const event = e as KeyboardEvent;
+      if (event.key !== "Tab") return;
+      const dialog = this.overlay.querySelector<HTMLElement>('[role="dialog"][aria-modal="true"]');
+      if (!dialog) return;
+      const focusable = [...dialog.querySelectorAll<HTMLElement>('button:not([disabled]),a[href],input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])')]
+        .filter(node => !node.closest("[hidden]") && getComputedStyle(node).visibility !== "hidden");
+      if (!focusable.length) return;
+      const first = focusable[0], last = focusable[focusable.length - 1];
+      if (event.shiftKey && (document.activeElement === first || !dialog.contains(document.activeElement))) {
+        event.preventDefault(); last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault(); first.focus();
+      }
+    });
+    this.listen(this.overlay,"contextmenu", (e) => {
       const target = (e.target as HTMLElement).closest<HTMLElement>("[data-action]");
       const action = target?.dataset.action;
       if (!target || !action || !CONTEXT_SLOT_ACTIONS.has(action)) return;
       e.preventDefault();
       this.onAction?.(action, target, e as MouseEvent);
     });
-    this.overlay.addEventListener("input", (e) => {
+    this.listen(this.overlay,"input", (e) => {
       const el = e.target as HTMLInputElement;
       if (el.id === "search") this.onSearch?.();
       else this.onChange?.(el);
     });
-    this.overlay.addEventListener("change", (e) =>
+    this.listen(this.overlay,"change", (e) =>
       this.onChange?.(e.target as HTMLInputElement),
     );
     // Capture logical slot identities: inventory redraws detach DOM nodes.
     // Never fake drag/drop by dispatching two sequential slot clicks.
     let dragged: { action: string; index: number; screen: Screen } | null = null;
     const valid = (action: string) => DRAGGABLE_SLOT_ACTIONS.has(action);
-    this.overlay.addEventListener("dragstart", (e) => {
+    this.listen(this.overlay,"dragstart", (e) => {
       const source = (e.target as HTMLElement).closest<HTMLElement>("[data-index]");
       const action = source?.dataset.action ?? "";
       const index = Number(source?.dataset.index);
@@ -223,20 +262,22 @@ export class UI {
         return;
       }
       dragged = { action, index, screen: this.screen };
-      if (e.dataTransfer) {
-        e.dataTransfer.effectAllowed = "move";
-        e.dataTransfer.setData("text/plain", `${action}:${index}`);
+      const transfer = (e as DragEvent).dataTransfer;
+      if (transfer) {
+        transfer.effectAllowed = "move";
+        transfer.setData("text/plain", `${action}:${index}`);
       }
     });
-    this.overlay.addEventListener("dragover", (e) => {
+    this.listen(this.overlay,"dragover", (e) => {
       const destination = (e.target as HTMLElement).closest<HTMLElement>("[data-index]");
       if (dragged && dragged.screen === this.screen && destination &&
           valid(destination.dataset.action ?? "")) {
         e.preventDefault();
-        if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+        const transfer = (e as DragEvent).dataTransfer;
+        if (transfer) transfer.dropEffect = "move";
       }
     });
-    this.overlay.addEventListener("drop", (e) => {
+    this.listen(this.overlay,"drop", (e) => {
       const source = dragged;
       dragged = null;
       const destination = (e.target as HTMLElement).closest<HTMLElement>("[data-index]");
@@ -247,10 +288,29 @@ export class UI {
       e.preventDefault();
       this.onMove?.(source.action, source.index, destination.dataset.action!, index);
     });
-    this.overlay.addEventListener("dragend", () => { dragged = null; });
+    this.listen(this.overlay,"dragend", () => { dragged = null; });
   }
+  private listen(target:EventTarget,type:string,listener:EventListenerOrEventListenerObject,options?:boolean|AddEventListenerOptions){
+    target.addEventListener(type,listener,options);
+    this.removers.push(()=>target.removeEventListener(type,listener,options));
+  }
+  dispose(){
+    if(this.disposed)return;this.disposed=true;
+    this.touchControls?.dispose();this.touchControls=undefined;
+    for(const remove of this.removers)remove();this.removers=[];
+    if(this.toastTimer!==undefined)window.clearTimeout(this.toastTimer);
+    this.toastTimer=undefined;
+    this.onScreenChange=undefined;this.onAction=undefined;this.onMove=undefined;
+    this.onChange=undefined;this.onSearch=undefined;this.onPerformanceAction=undefined;
+    this.onPresentationChange=undefined;
+  }
+  get listenerCount(){return this.removers.length;}
   show(screen: Screen, html = "") {
+    const changed=this.screen!==screen;
     this.screen = screen;
+    if (screen !== "none") this.hidePerformanceAdvisor();
+    this.touchControls?.setScreen(screen === "none");
+    if(changed)this.onScreenChange?.(screen);
     this.overlay.className =
       screen === "menu" || screen === "create"
         ? "home"
@@ -259,11 +319,64 @@ export class UI {
           : "modal-wrap";
     this.overlay.innerHTML = html;
     this.hud.hidden = ["menu", "create"].includes(screen);
+    this.onPresentationChange?.();
   }
   toast(message: string) {
     this.toastEl.textContent = message;
     this.toastEl.classList.add("visible");
-    setTimeout(() => this.toastEl.classList.remove("visible"), 3200);
+    if (this.toastTimer !== undefined) window.clearTimeout(this.toastTimer);
+    this.toastTimer = window.setTimeout(() => {
+      this.toastEl.classList.remove("visible");
+      this.toastTimer = undefined;
+    }, 3200);
+  }
+  private performanceAdviceCopy(current: GraphicsQuality, next: GraphicsQuality, fps: number) {
+    const currentLabel = GRAPHICS_PROFILES[current].label;
+    const nextLabel = GRAPHICS_PROFILES[next].label;
+    const safeFps = Number.isFinite(fps) ? Math.max(0, Math.round(fps)) : 0;
+    return { currentLabel, nextLabel, safeFps };
+  }
+  private pausedPerformanceAdvice(current: GraphicsQuality, next: GraphicsQuality, fps: number) {
+    const { currentLabel, nextLabel, safeFps } = this.performanceAdviceCopy(current, next, fps);
+    return [
+      '<section class="pause-performance-advisor" role="region" aria-live="polite" aria-label="Graphics performance recommendation">',
+      '<p class="performance-advisor__eyebrow">PERFORMANCE TIP</p>',
+      '<strong class="performance-advisor__title">Performance is dipping</strong>',
+      `<p class="performance-advisor__message">Jade Harbor was averaging ${safeFps} FPS on ${currentLabel}. You can switch to ${nextLabel} for smoother gameplay. This is optional; your world and gameplay stay unchanged.</p>`,
+      `<div class="pause-performance-advisor__actions"><button type="button" class="pause-performance-advisor__lower" data-performance-action="lower">Switch to ${nextLabel}</button><button type="button" data-performance-action="keep">Keep ${currentLabel}</button></div>`,
+      '</section>',
+    ].join("");
+  }
+  showPerformanceAdvisor(current: GraphicsQuality, next: GraphicsQuality, fps: number) {
+    if (this.screen !== "none") return;
+    const { currentLabel, nextLabel, safeFps } = this.performanceAdviceCopy(current, next, fps);
+    this.performanceAdvisorEl.innerHTML = [
+      '<div class="performance-advisor__copy" aria-live="polite">',
+      '<p class="performance-advisor__eyebrow">PERFORMANCE TIP</p>',
+      '<strong class="performance-advisor__title">Performance is dipping</strong>',
+      `<p class="performance-advisor__message">Jade Harbor is averaging ${safeFps} FPS on ${currentLabel}. You can switch to ${nextLabel} for smoother gameplay. This is optional; your world and gameplay stay unchanged.</p>`,
+      '</div>',
+      '<button type="button" class="performance-advisor__close" data-performance-action="keep" aria-label="Dismiss recommendation" title="Keep current quality">×</button>',
+      `<div class="performance-advisor__actions"><button type="button" class="performance-advisor__lower" data-performance-action="lower">Switch to ${nextLabel}</button><button type="button" data-performance-action="keep">Keep ${currentLabel}</button></div>`,
+    ].join("");
+    this.performanceAdvisorEl.hidden = false;
+  }
+  hidePerformanceAdvisor() {
+    this.performanceAdvisorEl.hidden = true;
+    this.performanceAdvisorEl.replaceChildren();
+    this.overlay.querySelector(".pause-performance-advisor")?.remove();
+  }
+  bindTouchControls(port: TouchInputPort, mouseLock: () => void) {
+    this.touchControls?.dispose();
+    let element = this.root.querySelector<HTMLElement>("#touch-controls");
+    if (!element) { element = document.createElement("div"); element.id = "touch-controls"; element.setAttribute("aria-label", "Touch gameplay controls"); this.root.append(element); }
+    this.touchControls = new TouchControls(element, port, {
+      mouseLock,
+      itemName: stack => item(stack.id)?.name ?? "Unknown item",
+      renderItem: (stack, counts) => icon(stack.id) + (counts && stack.count > 1 ? `<b>${stack.count}</b>` : "") +
+        (stack.durability === undefined ? "" : `<i class="touch-durability" style="width:${Math.max(0, Math.min(1, stack.durability / (item(stack.id)?.durability ?? 1))) * 80}%"></i>`),
+    });
+    this.touchControls.setScreen(this.screen === "none");
   }
   saveStatus(message: string) {
     this.saveStatusEl.textContent = message;
@@ -313,7 +426,6 @@ export class UI {
               `<button data-action="delete" data-id="${id}">Delete</button>`,
               "</div>",
               "</div>",
-              (save.generator??0) >= 6 && (save.generator??0) < 10 ? `<button class="world-density-copy" data-action="dense-city-copy" data-id="${id}" title="Create an updated city in a separate save, keeping your edits and progress. Starts at Panda Plaza.">Create updated city copy</button>` : "",
               '<div class="world-processing" role="status" aria-live="polite" hidden>',
               '<span class="processing-spinner" aria-hidden="true"></span>',
               '<span class="world-processing-label"></span>',
@@ -334,7 +446,7 @@ export class UI {
         '<h1>Build beyond.<br><em>Boundaries.</em></h1>',
         '<p>Explore a living Chinatown, carve into the mountains,<br class="wide"> or build something entirely your own.</p>',
         '<button class="primary large" data-action="new">Create your world <span>↗</span></button>',
-        '<div class="home-links"><button data-action="controls">How to play</button><i></i><button data-action="settings">Settings</button><i></i><button data-action="import">Import world</button></div>',
+        '<div class="home-links"><button data-browser-action="app-help">App &amp; offline help</button><button data-browser-action="install" hidden>Install Jade Harbor</button><button data-action="controls">How to play</button><i></i><button data-action="settings">Settings</button><i></i><button data-action="import">Import world</button></div><p class="browser-mode-note" data-browser-summary></p>',
         "</section>",
         '<section class="world-panel">',
         '<div class="world-panel-sticky">',
@@ -344,7 +456,7 @@ export class UI {
         `<div class="world-list">${worldList}</div>`,
         "</section>",
         "</div>",
-        '<footer class="home-footer"><span>JADE HARBOR <i> / </i> MORTAL REALM</span><span>Built block by block.</span><span>JADE HARBOR · v2.0.1</span></footer>',
+        `<footer class="home-footer"><span>JADE HARBOR <i> / </i> MORTAL REALM</span><span>Built block by block.</span><span>JADE HARBOR · v${appVersion}</span></footer>`,
       ].join(""),
     );
   }
@@ -370,9 +482,10 @@ export class UI {
   }
 
   panel(screen: Screen, title: string, subtitle: string, body: string) {
-    const goesBack = screen === "settings" || screen === "controls" || screen === "journal";
-    const closeAction = goesBack ? "back" : "resume";
-    const closeLabel = goesBack
+    const focusNewDialog = this.screen !== screen;
+    const goesBack = screen === "settings" || screen === "controls" || screen === "journal" || screen === "browser";
+    const closeAction = screen === "conflict" ? "conflict-menu" : goesBack ? "back" : "resume";
+    const closeLabel = screen === "conflict" ? "Return to saved worlds" : goesBack
       ? "Back to previous screen"
       : "Close dialog and return to world";
     const closeTitle = goesBack ? "Back (Esc)" : "Return to world (Esc)";
@@ -381,18 +494,24 @@ export class UI {
     this.show(
       screen,
       [
-        `<section class="${dialogClass}">`,
+        `<section class="${dialogClass}" role="dialog" aria-modal="true" aria-labelledby="dialog-title" aria-describedby="dialog-subtitle">`,
         '<div class="dialog-head"><div><div class="eyebrow">JADE HARBOR</div>',
-        `<h2>${title}</h2><p>${subtitle}</p></div>`,
+        `<h2 id="dialog-title">${title}</h2><p id="dialog-subtitle">${subtitle}</p></div>`,
         `<button type="button" class="close" data-action="${closeAction}" aria-label="${closeLabel}" title="${closeTitle}">×</button>`,
         "</div>",
         body,
         "</section>",
       ].join(""),
     );
+    if (focusNewDialog) this.overlay.querySelector<HTMLButtonElement>(".dialog .close")?.focus({ preventScroll: true });
   }
 
-  pause(name: string, mode: Mode, hardcoreEnded = false) {
+  pause(
+    name: string,
+    mode: Mode,
+    hardcoreEnded = false,
+    performanceAdvice?: { current: GraphicsQuality; next: GraphicsQuality; fps: number },
+  ) {
     const modeControl =
       mode !== "hardcore" && !hardcoreEnded
         ? `<div class="mode-control"><label>Game mode<select id="change-mode">${[
@@ -417,19 +536,24 @@ export class UI {
       '<button data-action="controls">Controls</button>',
     ].join("");
 
+    const advice = performanceAdvice
+      ? this.pausedPerformanceAdvice(performanceAdvice.current, performanceAdvice.next, performanceAdvice.fps)
+      : "";
     this.panel(
       "pause",
       "World paused.",
       `${esc(name)} · ${mode}`,
-      `<div class="pause-grid">${actions}</div>${modeControl}`,
+      `${advice}<div class="pause-grid">${actions}</div>${modeControl}`,
     );
   }
 
   inventory(inv: Inventory, creative: boolean, category = "All", query = "") {
-    // Inventory redraws must not reset the independent catalog and dialog scrollbars.
+    // Inventory redraws preserve the main dialog scroll position. The dialog is
+    // the single scroll container so its title/subtitle scroll with the catalog;
+    // the hotbar dock alone remains sticky at the bottom.
     const previousDialog =
       this.screen === "inventory"
-        ? this.overlay.querySelector<HTMLElement>(".inventory-scroll-area")
+        ? this.overlay.querySelector<HTMLElement>(".inventory-dialog")
         : null;
     const previousCatalog =
       this.screen === "inventory"
@@ -491,7 +615,7 @@ export class UI {
     const search = this.overlay.querySelector<HTMLInputElement>("#search");
     if (search) search.value = query;
     const nextDialog =
-      this.overlay.querySelector<HTMLElement>(".inventory-scroll-area");
+      this.overlay.querySelector<HTMLElement>(".inventory-dialog");
     const nextCatalog = this.overlay.querySelector<HTMLElement>("#catalog");
     const nextCategories = this.overlay.querySelector<HTMLElement>(".categories");
     if (nextDialog) nextDialog.scrollTop = dialogScroll;
@@ -582,11 +706,15 @@ export class UI {
 
   settings(settings: {
     graphicsQuality?: GraphicsQuality;
+    adaptiveResolution?: boolean;
+    frameRateLimit?: number | "auto";
     fov: number;
     sensitivity: number;
     distance: number;
     simulationDistance: number;
     volume: number;
+    touchControls?: TouchMode;
+    touchSensitivity?: number;
   }) {
     this.panel(
       "settings",
@@ -595,13 +723,20 @@ export class UI {
       [
         '<div class="settings">',
         `<label>Graphics quality<select id="graphicsQuality">${GRAPHICS_QUALITIES.map(q=>`<option value="${q}"${q===graphicsQuality(settings.graphicsQuality)?" selected":""}>${GRAPHICS_PROFILES[q].label}</option>`).join("")}</select></label>`,
-        '<p class="form-note">Low favors speed, Medium balances detail, and High preserves full detail. View distance sets scenery range. Simulation distance sets gameplay activity range.</p>',
+        '<p class="form-note">High is the default and preserves full detail. Medium balances detail and speed; Low favors speed. Jade Harbor can recommend a lower preset if performance stays low. View distance sets scenery range; simulation distance sets gameplay activity range.</p>',
+        `<label>Adaptive resolution<select id="adaptiveResolution"><option value="off"${settings.adaptiveResolution?"":" selected"}>Off</option><option value="on"${settings.adaptiveResolution?" selected":""}>On</option></select></label>`,
+        '<p class="form-note">Optional: gradually adjusts only the internal 3D render resolution when sustained render-side pressure is detected. CPU-bound slowdowns do not lower resolution. Menus and touch controls stay sharp. Independent of the High, Medium and Low graphics preset.</p>',
+        `<label>Frame limit<select id="frameRateLimit">${[["auto","Auto (recommended)"],[0,"Display rate"],[60,"60 FPS"],[40,"40 FPS"],[30,"30 FPS"]].map(([value,label])=>`<option value="${value}"${String(value)===String(settings.frameRateLimit??"auto")?" selected":""}>${label}</option>`).join("")}</select></label>`,
+        '<p class="form-note">Auto follows the display up to 60 FPS and chooses an even cadence on high-refresh screens. Display rate removes the cap. Simulation remains 20 TPS.</p>',
         `<label>Field of view <output>${settings.fov}°</output><input id="fov" type="range" min="55" max="105" value="${settings.fov}"></label>`,
         `<label>View distance <output>${settings.distance} chunks</output><input id="distance" type="range" min="3" max="8" value="${settings.distance}"></label>`,
         `<label>Simulation distance <output>${settings.simulationDistance} chunks</output><input id="simulationDistance" type="range" min="2" max="6" value="${settings.simulationDistance}"></label>`,
         `<label>Mouse sensitivity <output>${settings.sensitivity}</output><input id="sensitivity" type="range" min="1" max="12" value="${settings.sensitivity}"></label>`,
+        `<label>Touch controls<select id="touchControls">${[["auto", "Auto"], ["on", "Always on"], ["off", "Off"]].map(([value, label]) => `<option value="${value}"${value === touchMode(settings.touchControls) ? " selected" : ""}>${label}</option>`).join("")}</select></label>`,
+        '<p class="form-note">Auto shows controls on touch-first devices. Always on also supports hybrids. Keyboard, mouse and controllers remain available.</p>',
+        `<label>Touch look sensitivity <output>${touchSensitivity(settings.touchSensitivity).toFixed(1)}×</output><input id="touchSensitivity" type="range" min="0.5" max="2.5" step="0.1" value="${touchSensitivity(settings.touchSensitivity)}"></label>`,
         `<label>Sound volume <output>${settings.volume}%</output><input id="volume" type="range" min="0" max="100" value="${settings.volume}"></label>`,
-        '<div class="settings-actions"><button data-action="fullscreen">Toggle fullscreen ↗</button><button data-action="reset-settings">Reset to defaults</button></div>',
+        '<div class="settings-actions"><button data-action="fullscreen">Enter fullscreen</button><button data-browser-action="landscape-lock">Lock landscape</button><button data-browser-action="landscape-hint" aria-pressed="true">Landscape hint: On</button><button data-browser-action="app-help">App &amp; offline help</button><button data-browser-action="install" hidden>Install Jade Harbor</button><button data-action="export-performance">Download performance report</button><button data-action="reset-settings">Reset to defaults</button></div><p class="form-note" data-browser-summary></p>',
         "</div>",
       ].join(""),
     );
@@ -614,8 +749,8 @@ export class UI {
     this.panel(
       "controls",
       "Controls at a glance.",
-      "Designed for desktop keyboard and mouse.",
-      `<div class="control-grid">${controls}</div><p class="form-note">Workbenches, chests, kilns, beds and villagers use right-click. Hold Ctrl to place against an interactive block. Rice seeds plant on tilled soil; use a hoe on grass or earth first.</p><button class="primary full" data-action="resume">Back to game <span>↗</span></button>`,
+      "Keyboard, mouse, touchscreen and standard controllers.",
+      `<div class="control-grid">${controls}</div><h3>Touchscreen</h3><p class="form-note">Left joystick: move · Swipe open space: look · Jump: jump, swim or fly up · Mine: hold to mine/attack · Use: hold to place/use/interact · Sprint: hold to sprint · Crouch: crouch/fly down · Hotbar: tap any of nine slots · Items: inventory · Pause: pause · More: Drop and Creative Flight.</p><p class="form-note">Landscape is recommended; portrait and tablets are supported. Settings offers Auto, Always on or Off and separate touch sensitivity. Use normal taps to pick up and place inventory stacks; right-click splitting remains a desktop control.</p><h3>Standard controller</h3><p class="form-note">Left stick: move · Right stick: look · A/Cross: jump · B/Circle: crouch · X/Square: interact · Y/Triangle: inventory · LB: sprint · RT: mine/attack · LT: place/use · Start: pause/close · D-pad left/right: hotbar · Right-stick click: Creative flight.</p><p class="form-note">Release sticks and gameplay buttons after connecting or resuming.</p><p class="form-note">Workbenches, chests, kilns, beds and villagers use Use or right-click. Crouch to place against an interactive block. Rice seeds plant on tilled soil; use a hoe on grass or earth first.</p><button class="primary full" data-action="resume">Back to game <span>↗</span></button>`,
     );
   }
 
@@ -642,6 +777,7 @@ export class UI {
       debug: string;
     },
   ) {
+    this.touchControls?.updateHotbar(inv, data.mode, data.flying);
     const survivalStats = ["creative", "spectator"].includes(data.mode)
       ? ""
       : `<div class="survival-stats"><span class="health">♥ ${Math.ceil(data.health)} / 20</span><span>◇ ${inv.equipment.protection} armor · ✦ Lv ${Math.floor(Math.sqrt(data.xp / 8))} · ${data.xp} XP</span><span class="hunger">◒ ${Math.ceil(data.hunger)} / 20</span></div>`;

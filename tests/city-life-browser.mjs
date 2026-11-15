@@ -13,10 +13,10 @@ try{
   page=await browser.newPage({viewport:{width:960,height:600}});page.setDefaultTimeout(90000);page.on("pageerror",e=>errors.push(e.message));
   await mkdir(output,{recursive:true});await page.addInitScript(()=>localStorage.setItem("jade-harbor-settings",JSON.stringify({distance:3,simulationDistance:4})));
   await page.goto("http://127.0.0.1:4181");await page.locator('[data-action="new"]').click();await page.locator("#world-name").fill("Living city behavioral QA");await page.locator('[data-action="create"]').click();
-  await page.waitForFunction(()=>window.__game?.active);
-  assert.equal(await page.evaluate(()=>window.__game.world.generatorVersion),10);
+  await page.waitForFunction(()=>window.__game?.active&&!window.__game.opening&&!window.__game.saveTask);
+  assert(await page.evaluate(()=>window.__game.world.metropolisPlan.districts.length===10));
   assert.equal(await page.evaluate(()=>window.__game.entities.list.filter(e=>e.kind==="villager").length),4080);
-  passed("real UI creates current v10 world with 4080 unique persistent residents");
+  passed("real UI creates current world with 4080 unique persistent residents");
   const fixtures=await page.evaluate(()=>{
     const g=window.__game,plan=g.entities.life.plan;
     const publicPoint=id=>plan.spaces.find(s=>s.district===id).position;
@@ -156,9 +156,9 @@ try{
   await page.keyboard.down("KeyS");await page.waitForTimeout(1200);await page.keyboard.up("KeyS");
   assert(await page.evaluate(p=>Math.hypot(window.__game.body.position.x-p.x,window.__game.body.position.z-p.z)>.2,beforeWalk));passed("real walking input works during living-city play");
   const saved=await page.evaluate(async()=>{const g=window.__game;if(!(await g.save()))throw Error("living-city save failed");return {id:g.meta.id,ids:g.entities.list.filter(e=>e.kind==="villager").map(e=>e.id).sort(),flags:g.snapshot().achievements,food:g.inventory.count(105)};});
-  await page.reload();await page.locator(`[data-action="load"][data-id="${saved.id}"]`).click();await page.waitForFunction(()=>window.__game.active);
-  assert(await page.evaluate(s=>{const g=window.__game;return g.world.generatorVersion===10&&g.discoveries.count===33&&g.inventory.count(105)===s.food&&JSON.stringify(g.entities.list.filter(e=>e.kind==="villager").map(e=>e.id).sort())===JSON.stringify(s.ids);},saved));
-  passed("browser restart preserves discoveries, traded inventory, generator and all persistent resident identities");
+  await page.reload();await page.locator(`[data-action="load"][data-id="${saved.id}"]`).click();await page.waitForFunction(()=>window.__game.active&&!window.__game.opening&&!window.__game.saveTask);
+  assert(await page.evaluate(s=>{const g=window.__game;return g.discoveries.count===33&&g.inventory.count(105)===s.food&&JSON.stringify(g.entities.list.filter(e=>e.kind==="villager").map(e=>e.id).sort())===JSON.stringify(s.ids);},saved));
+  passed("browser restart preserves discoveries, traded inventory and all resident identities");
   await page.keyboard.press("Escape");await page.locator('[data-action="journal"]').click();await page.getByText("33 / 33 places discovered").waitFor();
   await page.setViewportSize({width:390,height:844});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth));await page.locator('[data-action="back"]').click();await page.setViewportSize({width:960,height:600});passed("travel journal is readable at narrow width and returns to Pause");
   // Rapid travel with active queues, repeated loads, real saves and a final return.
@@ -170,42 +170,8 @@ try{
     assert.equal(row.residents,4080);assert.equal(row.unique,row.total);assert(row.nav<=102);assert(row.chunks<200);assert(row.event<=3);assert(row.pending<=8);roam.push(row);
   }
   passed("sixteen rapid landmark visits with real saves retain bounded identities, routes, events and chunks");
-  const compatibilityIds=new Map();
-  for(const version of [3,4,5,6,7,8,9]){
-    const id=await page.evaluate(async version=>{
-      const g=window.__game,{freshWorld}=await import("/src/persistence/saves.ts");const old=freshWorld(`Compatibility ${version}`,"jade-harbor","creative");old.generator=version;
-      if(version===6){const {residents}=await import("/src/game/professions.ts"),{spawnEntity}=await import("/src/game/entities.ts");old.simulation={entities:residents(old.seed,g.world.cityPlan).map(r=>({...spawnEntity("villager",r.home,r.name),...r})),drops:[]};}
-      await g.start(old);if(!(await g.save()))throw Error("compatibility save failed");return g.meta.id;
-    },version);
-    compatibilityIds.set(version,id);
-    // District records are now supported in released city worlds too. Their
-    // existing spawn is on Avenue, so settle that legitimate walking visit
-    // before comparing the exact saved discovery set across reload.
-    if(version>=6){
-      await page.locator("canvas#game").click();await page.waitForFunction(()=>window.__game.input.locked);const p=await page.evaluate(()=>({...window.__game.body.position}));
-      await page.keyboard.down("KeyW");await page.waitForFunction(p=>Math.hypot(window.__game.body.position.x-p.x,window.__game.body.position.z-p.z)>=2.3,p);await page.keyboard.up("KeyW");
-      await page.waitForFunction(()=>window.__game.discoveries.has("discovery:district:avenue"));
-    }
-    const savedDiscoveries=await page.evaluate(async()=>{const g=window.__game;g.pause();if(!(await g.save()))throw Error("compatibility discovery save failed");return[...g.achievements].filter(id=>id.startsWith("discovery:")).sort();});
-    await page.reload();await page.locator(`[data-action="load"][data-id="${id}"]`).click();await page.waitForFunction(()=>window.__game.active);
-    const reopened=await page.evaluate(()=>{const g=window.__game;return{generator:g.world.generatorVersion,residents:g.entities.list.filter(e=>e.kind==="villager").length,discoveries:[...g.achievements].filter(id=>id.startsWith("discovery:")).sort()};});
-    assert.equal(reopened.generator,version);assert.equal(reopened.residents,version>=9?4080:version===8?4000:version===7?960:version===6?36:10);assert.deepEqual(reopened.discoveries,savedDiscoveries);
-    passed(`v${version} save/reload preserves generator and ${version===9?"the released 4,080-resident state":version===8?"the released 4,000-resident state":version===7?"the released 960-resident state":version===6?"extends the old ten-resident state once":"the original ten-resident state"}`);
-  }
-  // Exercise all four actual menu upgrade paths; the source slots remain frozen.
-  for(const version of[6,7,8,9]) {
-    await page.keyboard.press("Escape");await page.locator('[data-action="menu"]').click();
-    await page.locator(`[data-action="load"][data-id="${compatibilityIds.get(version)}"]`).click();await page.waitForFunction(()=>window.__game.active);
-    const source=await page.evaluate(async()=>{const g=window.__game;g.inventory.add(111,3);g.world.ensure(1,1,true);g.world.set(20,25,20,5);if(!(await g.save()))throw Error("copy source save failed");return{id:g.meta.id,tokens:g.inventory.count(111),ids:g.entities.list.filter(e=>e.kind==="villager").map(e=>e.id).sort()};});
-    await page.keyboard.press("Escape");await page.locator('[data-action="menu"]').click();await page.locator(`[data-action="dense-city-copy"][data-id="${source.id}"]`).click();
-    await page.getByText(`Compatibility ${version} (dense city)`,{exact:true}).waitFor();
-    const copy=await page.evaluate(async({source,version})=>{const {listSaves,loadSave}=await import("/src/persistence/saves.ts");const summary=(await listSaves()).find(s=>s.name===`Compatibility ${version} (dense city)`),old=await loadSave(source.id),dense=await loadSave(summary.id);if(old.generator!==version||dense.generator!==10||old.id===dense.id||dense.edits["20,25,20"]!==5||JSON.stringify(old.simulation.entities.filter(e=>e.kind==="villager").map(e=>e.id).sort())!==JSON.stringify(source.ids))throw Error("copy identity or edit regression");return{id:dense.id};},{source,version});
-    await page.locator(`[data-action="load"][data-id="${copy.id}"]`).click();await page.waitForFunction(()=>window.__game.active);
-    assert(await page.evaluate(source=>{const g=window.__game,ids=new Set(g.entities.list.map(e=>e.id));return g.world.generatorVersion===10&&g.entities.list.filter(e=>e.kind==="villager").length===4080&&g.inventory.count(111)===source.tokens&&source.ids.every(id=>ids.has(id));},source));
-    passed(`world-list denser-city copy preserves the v${version} original, overlay, inventory and identities in an explicit v10 save`);
-  }
   assert.deepEqual(errors,[]);
-  await writeFile(`${output}/results.json`,JSON.stringify({status:"passed",checks,scenes,roam,errors,fixtureNote:"Actual generated world and existing renderer. Camera/time/arrival fixtures accelerate QA. Normal ticks pause while geometry/light queues settle, then actual NPC fixed ticks advance behavior and twenty live rendered frames measure the running game; active water/NPC remeshing is bounded rather than required to stop. Controlled fixed ticks use real movement/navigation/doors; actor positions are not staged for visual scenes. Discovery arrival fixtures use grounded Game ticks. Trade and a representative walk use real input. Temporary screenshots stay outside the release archive. No full uninterrupted 30-minute real-time walk or hardware FPS guarantee is claimed."},null,2));
+  await writeFile(`${output}/results.json`,JSON.stringify({status:"passed",checks,scenes,roam,errors,fixtureNote:"Actual generated world and existing renderer. Camera/time/arrival fixtures accelerate QA. Normal ticks pause while geometry/light queues settle, then actual NPC fixed ticks advance behavior and twenty live rendered frames measure the running game; active water/NPC remeshing is bounded rather than required to stop. Controlled fixed ticks use real movement/navigation/doors; actor positions are not staged for visual scenes. Discovery arrival fixtures use grounded Game ticks. Trade and a representative walk use real input. Temporary screenshots stay outside the intermediate artifact. No full uninterrupted 30-minute real-time walk or hardware FPS guarantee is claimed."},null,2));
   console.log("PASS",checks.join("; "));
 }catch(error){
   await writeFile(`${output}/failure.json`,JSON.stringify({error:String(error),checks,scenes,errors,state:page&&!page.isClosed()?await page.evaluate(()=>{const g=window.__game;return {position:g?.body.position,screen:g?.ui.screen,discovered:g?.discoveries?.count,pending:g?.world.pending.size,dirty:g?.world.dirty.size};}):null},null,2));throw error;

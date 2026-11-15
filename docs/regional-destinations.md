@@ -1,23 +1,17 @@
-# Five regional destinations
+# Regional destinations
 
-Beyond the central Chinatown metropolis, Jade Harbor includes five regional destinations. Each has its own landscape, local buildings, public paths, and resident activity while remaining connected to the same continuous world.
+The current world generator constructs five coherent regional precincts alongside the central city and eight major landmarks. Each precinct has a bounded reservation, local buildings or landscape, public loop, entry and connection to existing routes.
 
-| Destination | Character and places to explore |
+| Destination | Regional character |
 |---|---|
-| **Willow Valley Tulou** | A southwestern communal earthen-house setting with an open court, ancestral hall, pottery house, and inn. |
-| **Amber Gate Village** | A western heritage village with an enclosing wall and gate, merchant lanes, varied low-rise homes, and a public street. |
-| **Li River Stone Walk** | An eastern limestone-pillar landscape with a contour path, lookout tea house, trail lodge, and guard post. |
-| **Mist Terrace Tea Village** | A northern hillside settlement with a guild, stair-side inn, tea house, lookout, and limited tea terraces. |
-| **Lotus Causeway Gardens** | A southern planted-lake precinct with causeways, pavilions, a tea house, and a garden inn. |
+| Willow Valley Tulou | Southwestern communal house, open court, pottery house and inn |
+| Amber Gate Village | Historic merchant lanes, gate, varied houses and public street |
+| Li River Stone Walk | Eastern limestone scenery, contour trail, lookout tea house and lodge |
+| Mist Terrace Tea Village | Northern hillside guild, inn, tea house and limited tea planting |
+| Lotus Causeway Gardens | Southern lake, causeways, pavilions and garden inn |
 
-## A varied landscape around the city
+Protected city lots, roads, original landmarks, the mine and natural waterways take priority. Realization is deterministic, local to requested chunks, and does not flatten the full map. The generic woodland mask is bounded below five percent of the envelope; destination cultivation and authored plantings are separate managed land uses.
 
-The regions are designed to complement the city's eight major landmarks rather than repeat them. Rocky ridges, karst formations, tea terraces, orchards, gardens, open river edges, and scenic paths give former woodland and field areas a more specific local identity.
+The Travel Journal groups 33 discovery records into 18 public hubs. World edits, resident simulation and routes are stored or recomputed through the normal save/world systems; there is no special generator migration path.
 
-Generic wild forest remains a small part of the measured world envelope. The current potential mask is four percent, and measured generic-forest coverage remains below five percent. Managed gardens, courtyard trees, tea planting, and orchards are separate landscape uses, not generic forest.
-
-## Explore the regions
-
-The five destinations each have one Travel Journal hub. Walk their public paths and viewpoints to record individual discoveries; traveling to the hub does not automatically complete every discovery in the area. See [Travel Journal](travel-journal.md) for unlock rules and [landmarks](landmarks.md) for the eight major city and landscape landmarks.
-
-All five regions fit within the established world footprint. They add variety through local architecture and landscape rather than expanding the map.
+See [landmarks](landmarks.md), [world plan](world-plan.md), [Travel Journal](travel-journal.md), and [architecture](architecture.md).

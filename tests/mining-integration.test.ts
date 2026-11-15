@@ -6,10 +6,10 @@ import { Inventory } from "../src/game/inventory";
 import { Entities } from "../src/game/entities";
 import { Simulation } from "../src/game/simulation";
 import { B } from "../src/world/blocks";
-function fixture(id:number,tool=130,generator=3) {
-  const world=new World("mining",{},false,generator);world.chunks.set("0,0",{cx:0,cz:0,blocks:new BlockColumn(),revision:0});world.set(2,-20,2,id);
+function fixture(id:number,tool=130) {
+  const world=new World("mining",{},false);world.chunks.set("0,0",{cx:0,cz:0,blocks:new BlockColumn(),revision:0});world.set(2,-20,2,id);
   const g=Object.create(Game.prototype) as Game;
-  Object.assign(g,{world,inventory:new Inventory(),mode:"survival",hit:{x:2,y:-20,z:2,value:id,normal:{x:0,y:0,z:1},distance:2},input:{left:true},mineProgress:0,mineKey:"",xp:0,containers:{},simulation:new Simulation(world),entities:new Entities(world,{entities:[],drops:[]}),effects:{burst:()=>{}},audio:{play:()=>{}},ui:{toast:()=>{}},achievements:new Set()});
+  Object.assign(g,{world,inventory:new Inventory(),mode:"survival",hit:{x:2,y:-20,z:2,value:id,normal:{x:0,y:0,z:1},distance:2},input:{held:()=>true},mineProgress:0,mineKey:"",xp:0,containers:{},simulation:new Simulation(world),entities:new Entities(world,{entities:[],drops:[]}),effects:{burst:()=>{}},audio:{play:()=>{}},ui:{toast:()=>{}},achievements:new Set()});
   g.inventory.add(tool);return g;
 }
 function mine(g:Game){let ticks=0;while(g.world.get(2,-20,2)!==0 && ticks<500){g.mine(.05);ticks++;}return ticks;}
@@ -28,6 +28,6 @@ it("keeps a full station and its block intact if its whole drop transaction cann
   mine(g);expect(g.world.get(2,-20,2)).toBe(B.Chest);expect(g.containers).toEqual(before);expect(g.inventory.held!.durability).toBe(240);
 });
 
-it.each([6,7])("keeps the v%i Game mining path valid without populating an explicitly empty entity component",version=>{
-  const g=fixture(B.Stone,130,version);const ticks=mine(g);expect(ticks).toBeGreaterThan(0);expect(ticks).toBeLessThan(500);expect(g.world.generatorVersion).toBe(version);expect(g.world.get(2,-20,2)).toBe(0);expect(g.entities.drops[0].stack.id).toBe(B.Stone);expect(g.entities.life).toBeUndefined();g.entities.dispose();g.world.dispose();
+it("keeps the current mining path valid without populating an explicitly empty entity component",()=>{
+  const g=fixture(B.Stone,130);const ticks=mine(g);expect(ticks).toBeGreaterThan(0);expect(ticks).toBeLessThan(500);expect(g.world.get(2,-20,2)).toBe(0);expect(g.entities.drops[0].stack.id).toBe(B.Stone);expect(g.entities.life).toBeUndefined();g.entities.dispose();g.world.dispose();
 });

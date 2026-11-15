@@ -156,6 +156,8 @@ try {
       ),
     );
   }
+  // Mouse deltas are buffered and consumed by the foreground input poll.
+  await page.waitForFunction(yaw => window.__game.yaw !== yaw, yaw);
   assert.notEqual(await page.evaluate(() => window.__game.yaw), yaw);
   passed("real WASD and camera input handler (relative mouse event fixture)");
   // Natural ground is generated, not injected. Only player positioning is a test fixture.

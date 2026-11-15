@@ -1,17 +1,7 @@
 import { B } from "../blocks";
 import { packed } from "../../core/coords";
 import { hash } from "../noise";
-import {
-  CityPlan,
-  Structure,
-  CITY_Y,
-  roadAt,
-  canalAt,
-  contains,
-  parkAt,
-  districtAt,
-  DISTRICTS,
-} from "./plan";
+import type { Structure } from "./plan";
 import { VoxelWriter } from "./writer";
 import { drawPanda } from "./panda";
 function child(
@@ -496,79 +486,4 @@ export function drawStructure(w: VoxelWriter, s: Structure) {
   if (s.kind === "pavilion") return pavilion(w, s);
   if (s.kind === "stall") return stall(w, s);
   return house(w, s);
-}
-export function drawStreets(w: VoxelWriter, p: CityPlan) {
-  // Canal embankments, approach-level bridges and continuous pedestrian banks.
-  for (let z = w.oz; z < w.oz + 16; z++)
-    if (z - p.oz > -234 && z - p.oz < 144) {
-      const bridge = p.roads.find(
-        (r) => r.axis === "z" && Math.abs(z - p.oz - r.at) <= r.half,
-      );
-      for (let x = w.ox; x < w.ox + 16; x++) {
-        const dx = Math.abs(x - p.ox - 144);
-        if (dx <= 4) {
-          if (bridge) w.put(x, 20, z, B.Marble);
-          else {
-            w.fill(x, 18, z, x, 19, z, B.Water);
-            w.put(x, 20, z, B.Air);
-          }
-        } else if (dx === 5) w.fill(x, 18, z, x, 20, z, B.SculptureStone);
-        else if (dx <= 8) w.put(x, 20, z, B.Paving);
-        if (bridge && Math.abs(z - p.oz - bridge.at) === bridge.half && dx <= 5)
-          w.put(x, 21, z, B.Fence);
-      }
-    }
-  // Street objects use reserved sidewalk bands, never the road center.
-  for (const road of p.roads) {
-    if (road.axis !== "x") continue;
-    for (
-      let z = Math.floor((w.oz - p.oz - 3) / 24) * 24;
-      z < w.oz - p.oz + 19;
-      z += 24
-    ) {
-      const gz = z + p.oz,
-        at = road.at + p.ox;
-      if (
-        Math.abs(z) > 306 ||
-        p.reservations.some((r) => contains(r, at, gz)) ||
-        p.roads.some((r) => r.axis === "z" && Math.abs(r.at - z) < 10)
-      )
-        continue;
-      for (const side of [-1, 1]) {
-        const x = at + side * (road.half + 1);
-        if (
-          canalAt(p, x, gz) ||
-          (Math.abs(road.at - 144) < 1 && z > -234 && z < 144)
-        )
-          continue;
-        w.fill(x, 21, gz, x, 25, gz, B.DarkTimber);
-        w.put(x, 26, gz, B.GoldTrim);
-        w.put(x, 24, gz + 1, B.Lantern);
-      }
-      if (road.at === 0) {
-        w.fill(at - 6, 26, gz, at + 6, 26, gz, B.Fence);
-        for (const dx of [-3, 0, 3]) w.put(at + dx, 25, gz, B.Lantern);
-      }
-    }
-  }
-  // Only planned park interiors receive greenery. Candidate roots consider their full canopy margin.
-  for (let z = Math.floor((w.oz - 5) / 9) * 9; z <= w.oz + 21; z += 9)
-    for (let x = Math.floor((w.ox - 5) / 9) * 9; x <= w.ox + 21; x += 9) {
-      if (
-        !parkAt(p, x, z) ||
-        roadAt(p, x, z, 6) ||
-        p.structures.some(
-          (s) =>
-            x >= s.x1 - 4 && x <= s.x2 + 4 && z >= s.z1 - 4 && z <= s.z2 + 4,
-        ) ||
-        p.alleys.some(
-          (a) =>
-            x >= a.x1 - 4 && x <= a.x2 + 4 && z >= a.z1 - 4 && z <= a.z2 + 4,
-        )
-      )
-        continue;
-      if (hash(x, z, p.seed) < 0.5)
-        tree(w, x, 21, z, hash(x, z, p.seed + 3) > 0.25);
-      else w.fill(x, 21, z, x, 27, z, B.Bamboo);
-    }
 }

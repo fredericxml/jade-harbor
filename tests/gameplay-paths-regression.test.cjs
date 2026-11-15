@@ -21,10 +21,11 @@ const position={x:0,y:40,z:0};
 const mk=(selectedId,mode='survival',hitBlock=B.Stone)=>{
  const game=new GameplayMethods(), cells=new Map([[coords.blockKey(2,40,2),hitBlock]]), mutations=[];
  game.mode=mode;game.cooldown=0;game.health=12;game.hunger=8;game.saturation=5;game.xp=0;game.mineProgress=0;
- game.input={keys:new Set(),left:true};game.body={position:{...position}};
+ game.input={held:action=>action==="primary"};game.body={position:{...position}};
  game.inventory=new Inventory();if(selectedId!==null) assert.equal(game.inventory.add(selectedId),0,`Cannot insert item ${selectedId}`);
  game.world={get(x,y,z){return cells.get(coords.blockKey(x,y,z))??0},loaded:()=>true,set(x,y,z,v){cells.set(coords.blockKey(x,y,z),v);mutations.push([x,y,z,v]);return true}};
  game.hit={x:2,y:40,z:2,value:hitBlock,normal:{x:1,y:0,z:0},distance:2};game.target=()=>game.hit;
+ game.view={commitMinedBlock(_world,x,y,z){assert.equal(game.world.get(x,y,z),0,"visual refresh must follow the world edit");}};
  game.entities={target:()=>null,drop:()=>true};game.direction=()=>({x:1,y:0,z:0});game.audio={play:()=>{}};
  game.ui={toast:()=>{}};game.effects={burst:()=>{}};game.unlockAchievement=()=>{};game.scheduleSave=()=>{};
  game.status=new StatusEffects();game.yaw=0;

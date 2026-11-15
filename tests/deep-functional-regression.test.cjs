@@ -51,7 +51,7 @@ function gameMethods(names) {
   );
 }
 
-const AuditGame = gameMethods(['mine', 'key']);
+const AuditGame = gameMethods(['mine', 'command']);
 
 function makeMineGame(blockValue, mode = 'survival', heldId = null) {
   const game = new AuditGame();
@@ -60,7 +60,7 @@ function makeMineGame(blockValue, mode = 'survival', heldId = null) {
   let lootCalls = 0;
   let loot = [];
   game.mode = mode;
-  game.input = { left: true, keys: new Set() };
+  game.input = { held: action => action === "primary" };
   game.hit = { x: 2, y: 40, z: 2, value: blockValue, normal: { x: 1, y: 0, z: 0 }, distance: 2 };
   game.mineProgress = 0;
   game.mineKey = '';
@@ -70,6 +70,7 @@ function makeMineGame(blockValue, mode = 'survival', heldId = null) {
     get(x, y, z) { return cells.get(coords.blockKey(x, y, z)) ?? 0; },
     set(x, y, z, v) { cells.set(coords.blockKey(x, y, z), v); return true; },
   };
+  game.view = { commitMinedBlock(_world,x,y,z) { assert.equal(game.world.get(x,y,z),0, "visual refresh must follow the world edit"); } };
   game.breakContents = (_x, _y, _z, drops) => { lootCalls++; loot = clone(drops); return true; };
   game.effects = { burst() {} };
   game.audio = { play() {} };
@@ -170,13 +171,13 @@ test('Spectator Q cannot drop inventory items; Survival Q still drops and consum
     return { game, drops: () => drops, saves: () => saves };
   };
   const spectator = make('spectator');
-  spectator.game.key('KeyQ');
+  spectator.game.command({action:'drop',value:0});
   assert.equal(spectator.drops(), 0);
   assert.equal(spectator.game.inventory.count(105), 2);
   assert.equal(spectator.saves(), 0);
 
   const survival = make('survival');
-  survival.game.key('KeyQ');
+  survival.game.command({action:'drop',value:0});
   assert.equal(survival.drops(), 1);
   assert.equal(survival.game.inventory.count(105), 1);
   assert.equal(survival.saves(), 1);

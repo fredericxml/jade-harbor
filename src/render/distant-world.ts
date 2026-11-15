@@ -8,9 +8,16 @@ import { block, B } from "../world/blocks";
 import type { Palette, RoofKind } from "../world/landmarks/types";
 import type { Rect } from "../world/city/plan";
 import type { Atmosphere } from "./atmosphere";
-import { GRAPHICS_PROFILES, type GraphicsProfile } from "./graphics";
+import { GRAPHICS_PROFILES, graphicsQualityLevel, type GraphicsProfile } from "./graphics";
+import { DISTANT_VERTEX_SHADER, distantFragmentShader } from "./shader-quality";
+import { distantWaterMaterial } from "./material";
+import { classifyDistantWaterCell } from "./distant-water";
+import { MeshCoverageIndex, type MeshCoverageChange } from "./mesh-coverage";
+import type { RenderWorkloadAudit } from "./render-audit";
 
 const SIZE=128,LAYERS=MAX_SECTION-MIN_SECTION+1,STEP=16;
+// Skyline content is invariant across graphics presets; only its terrain/shader representation may vary.
+const CROWN_BUILDINGS_PER_DISTRICT=4;
 export const DISTANT_RADIUS=720;
 export type ProxyBox={id:string;x:number;y:number;z:number;w:number;h:number;d:number;color:string;yaw:number};
 export type DistantPlan={originX:number;originZ:number;width:number;depth:number;step:number;boxes:ProxyBox[]};
@@ -72,10 +79,10 @@ export function distantPlan(world:World,profile:GraphicsProfile=GRAPHICS_PROFILE
   // selected silhouette set, never a second rendering of every city house.
   const density=world.densityPlan,urban=world.metropolisPlan;
   const designs=density&&"designs" in density&&density.designs instanceof Map?density.designs as ReadonlyMap<string,RichDesign>:undefined;
-  if(world.generatorVersion===10&&designs&&urban)for(const district of urban.districts){
+  if(designs&&urban)for(const district of urban.districts){
     const lots=urban.lots.filter(l=>l.districtId===district.id),cx=(district.bounds.x1+district.bounds.x2)/2,cz=(district.bounds.z1+district.bounds.z2)/2;
-    for(let choice=0;choice<profile.crownBuildingsPerDistrict;choice++){
-      const quadrant=profile.crownBuildingsPerDistrict===1?-1:Math.round(choice*3/(profile.crownBuildingsPerDistrict-1));
+    for(let choice=0;choice<CROWN_BUILDINGS_PER_DISTRICT;choice++){
+      const quadrant=Math.round(choice*3/(CROWN_BUILDINGS_PER_DISTRICT-1));
       const lot=lots.filter(l=>quadrant<0||Number((l.x1+l.x2)/2>=cx)+2*Number((l.z1+l.z2)/2>=cz)===quadrant).sort((a,b)=>{const da=designs.get(a.id)!,db=designs.get(b.id)!;return db.floors-da.floors||(b.x2-b.x1)*(b.z2-b.z1)-(a.x2-a.x1)*(a.z2-a.z1)||a.id.localeCompare(b.id);})[0];if(!lot)continue;
       const design=designs.get(lot.id)! as RichDesign,assembly=planRichBuilding(lot,design);
       foundation(`crown:${lot.id}`,lot,lot.baseY);
@@ -117,31 +124,29 @@ export class DistantWorld {
   readonly coverage=new Uint8Array(SIZE*SIZE*LAYERS);
   readonly texture=new THREE.DataTexture(this.coverage,SIZE,SIZE*LAYERS,THREE.RedFormat);
   readonly material:THREE.ShaderMaterial;
-  readonly stats={terrainTriangles:0,anchorTriangles:0,anchorBoxes:0,buildMs:0,updates:0,maxBuildSliceMs:0,ready:false,quality:"high",pendingQuality:"",planMs:0};
-  private terrain?:THREE.Mesh; private anchors?:THREE.Mesh; private work?:Generator<void,void,unknown>;
+  readonly stats={terrainTriangles:0,waterTriangles:0,anchorTriangles:0,anchorBoxes:0,buildMs:0,updates:0,maxBuildSliceMs:0,terrainReady:false,anchorsReady:false,ready:false,quality:"high",pendingQuality:"",planMs:0};
+  private terrain?:THREE.Mesh; private distantWater?:THREE.Mesh; private anchors?:THREE.Mesh; private work?:Generator<void,void,unknown>;
+  readonly waterMaterial:THREE.ShaderMaterial;
   private pending:THREE.BufferGeometry[]=[];private profile:GraphicsProfile;
-  private marked=new Set<number>();private nextMarked=new Set<number>();private coverageColumns=new Set<string>();private coordinates=new Map<string,{cx:number;sy:number;cz:number;column:string}>();private lastNavRevision=-1; private disposed=false; private lastRevision=-1;
-  constructor(private world:World,atmosphere:Atmosphere,profile:GraphicsProfile=GRAPHICS_PROFILES.high) {
-    this.profile=profile;const began=performance.now();this.plan=distantPlan(world,profile);this.stats.planMs=performance.now()-began;this.stats.quality=profile.quality;this.texture.minFilter=this.texture.magFilter=THREE.NearestFilter;this.texture.generateMipmaps=false;this.texture.needsUpdate=true;
+  private coverageIndex?:MeshCoverageIndex;private disposed=false;
+  constructor(private world:World,atmosphere:Atmosphere,profile:GraphicsProfile=GRAPHICS_PROFILES.high,private readonly renderAudit?:RenderWorkloadAudit) {
+    this.profile=profile;const began=performance.now();this.plan=distantPlan(world,profile);if(this.plan)this.coverageIndex=new MeshCoverageIndex(world,this.coverage,this.plan.originX,this.plan.originZ);this.stats.planMs=performance.now()-began;this.stats.quality=profile.quality;this.texture.minFilter=this.texture.magFilter=THREE.NearestFilter;this.texture.generateMipmaps=false;this.texture.needsUpdate=true;
     this.material=new THREE.ShaderMaterial({vertexColors:true,side:THREE.DoubleSide,
-      uniforms:{coverage:{value:this.texture},origin:{value:new THREE.Vector2(this.plan?.originX??0,this.plan?.originZ??0)},fogColor:{value:atmosphere.fog},lightTint:{value:atmosphere.light},daylight:{value:1},fogNear:{value:50},fogFar:{value:400},fogDetail:{value:100},cameraXZ:{value:new THREE.Vector2()},sunDirection:{value:atmosphere.sunDirection}},
-      vertexShader:`attribute float kind;varying vec3 vWorld;varying vec3 vColor;varying vec3 vNormal;varying float vKind;varying float vDepth;
-void main(){vWorld=(modelMatrix*vec4(position,1.)).xyz;vColor=color;vNormal=normal;vKind=kind;vec4 mv=modelViewMatrix*vec4(position,1.);vDepth=-mv.z;gl_Position=projectionMatrix*mv;}`,
-      fragmentShader:`uniform sampler2D coverage;uniform vec2 origin;uniform vec2 cameraXZ;uniform vec3 fogColor;uniform vec3 lightTint;uniform vec3 sunDirection;uniform float daylight;uniform float fogNear;uniform float fogFar;uniform float fogDetail;varying vec3 vWorld;varying vec3 vColor;varying vec3 vNormal;varying float vKind;varying float vDepth;
-float covered(float sy,vec2 cell){if(sy<0.||sy>=24.)return 0.;return texture2D(coverage,vec2((cell.x+.5)/128.,(cell.y+sy*128.+.5)/3072.)).r;}
-void main(){float distance=length(vWorld.xz-cameraXZ);if(distance<24.||distance>${DISTANT_RADIUS.toFixed(1)})discard;vec2 cell=floor((vWorld.xz-origin)/16.);float sy=floor((vWorld.y-.02)/16.)+4.;float mask=covered(sy,cell);if(vKind<.5)mask=max(mask,max(covered(sy-1.,cell),covered(sy+1.,cell)));if(cell.x>=0.&&cell.y>=0.&&cell.x<128.&&cell.y<128.&&mask>.5)discard;
-float shade=.72+.28*max(0.,dot(normalize(vNormal),sunDirection));vec3 c=vColor*lightTint*(.22+.78*daylight)*shade;float depth=max(vDepth,distance*.8);float haze=.7*smoothstep(fogNear,fogDetail,depth)+.3*smoothstep(fogDetail,fogFar,depth);c=mix(c,fogColor,haze);gl_FragColor=vec4(c,1.);
-#include <colorspace_fragment>
-}`});
+      uniforms:{coverage:{value:this.texture},origin:{value:new THREE.Vector2(this.plan?.originX??0,this.plan?.originZ??0)},fogColor:{value:atmosphere.fog},lightTint:{value:atmosphere.light},daylight:{value:1},fogNear:{value:50},fogFar:{value:400},fogDetail:{value:100},cameraXZ:{value:new THREE.Vector2()},sunDirection:{value:atmosphere.sunDirection},qualityLevel:{value:graphicsQualityLevel(profile)}},
+      vertexShader:DISTANT_VERTEX_SHADER,
+      fragmentShader:distantFragmentShader(DISTANT_RADIUS)});
+    this.waterMaterial=distantWaterMaterial(this.texture,profile.quality);
+    this.waterMaterial.uniforms.origin.value.set(this.plan?.originX??0,this.plan?.originZ??0);
     this.group.name="render-only-distant-world";
     if(this.plan){this.work=this.build(this.plan);this.stats.anchorBoxes=this.plan.boxes.length;}
   }
   setProfile(profile:GraphicsProfile){
     if(this.disposed||profile===this.profile)return;
     this.work?.return(undefined);this.work=undefined;for(const g of this.pending)g.dispose();this.pending.length=0;
-    this.profile=profile;const began=performance.now();const old=this.plan;this.plan=distantPlan(this.world,profile);if(old)old.boxes.length=0;
-    this.stats.planMs=performance.now()-began;this.stats.buildMs=0;this.stats.maxBuildSliceMs=0;this.stats.ready=false;this.stats.pendingQuality=profile.quality;
-    if(this.plan){this.work=this.build(this.plan);this.stats.anchorBoxes=this.plan.boxes.length;}
+    this.profile=profile;this.material.uniforms.qualityLevel.value=graphicsQualityLevel(profile);this.waterMaterial.uniforms.qualityLevel.value=graphicsQualityLevel(profile);const began=performance.now();const old=this.plan;this.plan=distantPlan(this.world,profile);if(old)old.boxes.length=0;
+    this.stats.planMs=performance.now()-began;this.stats.buildMs=0;this.stats.maxBuildSliceMs=0;this.stats.ready=false;this.stats.terrainReady=!!this.terrain;this.stats.anchorsReady=!!this.anchors;this.stats.pendingQuality=profile.quality;
+    if(this.plan){this.material.uniforms.origin.value.set(this.plan.originX,this.plan.originZ);this.waterMaterial.uniforms.origin.value.set(this.plan.originX,this.plan.originZ);if(this.coverageIndex){if(this.coverageIndex.setOrigin(this.plan.originX,this.plan.originZ))this.texture.needsUpdate=true;}else this.coverageIndex=new MeshCoverageIndex(this.world,this.coverage,this.plan.originX,this.plan.originZ);this.work=this.build(this.plan);this.stats.anchorBoxes=this.plan.boxes.length;}
+    else {this.coverageIndex?.clear();this.coverageIndex=undefined;}
   }
   private *build(plan:DistantPlan):Generator<void,void,unknown> {
     const macro=this.world.macroPlan!,step=plan.step,stride=plan.width+1,heights=new Float64Array(stride*(plan.depth+1)),types=new Uint8Array(heights.length);
@@ -149,12 +154,39 @@ float shade=.72+.28*max(0.,dot(normalize(vNormal),sunDirection));vec3 c=vColor*l
     for(let z=0;z<=plan.depth;z++){
       for(let x=0;x<=plan.width;x++){const wx=plan.originX+x*step,wz=plan.originZ+z*step,t=sampleTerrain(macro,wx,wz),i=x+z*stride;heights[i]=distantSurface(this.world,wx,wz,t.elevation);types[i]=t.water?3:t.urban?2:t.scenic||t.height>85?1:0;}yield;
     }
-    const terrain=new DistantBuffer(plan.width*plan.depth*6);let at=0;
-    const vertex=(x:number,z:number)=>{const i=x+z*stride;terrain.vertex(at++,plan.originX+x*step,heights[i],plan.originZ+z*step,palette[types[i]],0);};
+    const cellWater=new Uint8Array(plan.width*plan.depth);let waterCellCount=0;
     for(let z=0;z<plan.depth;z++){
-      for(let x=0;x<plan.width;x++){const start=at;vertex(x,z);vertex(x,z+1);vertex(x+1,z);terrain.triangle(start);vertex(x+1,z);vertex(x,z+1);vertex(x+1,z+1);terrain.triangle(start+3);}yield;
+      for(let x=0;x<plan.width;x++){
+        const a=x+z*stride,b=x+(z+1)*stride,c=x+1+z*stride,d=x+1+(z+1)*stride;
+        const wa=types[a]===3,wb=types[b]===3,wc=types[c]===3,wd=types[d]===3;
+        const mixed=(wa||wb||wc||wd)&&!(wa&&wb&&wc&&wd);
+        // Only shoreline cells need a center probe. Fully dry cells stay dry;
+        // this avoids doubling terrain sampling over the large land majority.
+        const centerWater=mixed?sampleTerrain(macro,plan.originX+(x+.5)*step,plan.originZ+(z+.5)*step).water:false;
+        if(classifyDistantWaterCell(wa,wb,wc,wd,centerWater)){cellWater[x+z*plan.width]=1;waterCellCount++;}
+      }
+      yield;
     }
-    const ground=terrain.geometry();this.pending.push(ground);yield;
+    const terrain=new DistantBuffer((plan.width*plan.depth-waterCellCount)*6);
+    const water=waterCellCount?new DistantBuffer(waterCellCount*6):undefined;
+    let at=0,waterAt=0;
+    const waterVertexColor=new THREE.Color("#ffffff");
+    const vertex=(target:DistantBuffer,index:number,x:number,z:number,waterFace:boolean)=>{const i=x+z*stride;const color=waterFace?waterVertexColor:palette[types[i]===3?0:types[i]];target.vertex(index,plan.originX+x*step,heights[i],plan.originZ+z*step,color,0);};
+    for(let z=0;z<plan.depth;z++){
+      for(let x=0;x<plan.width;x++){
+        const isWater=cellWater[x+z*plan.width]===1,target=isWater?water!:terrain,start=isWater?waterAt:at;
+        vertex(target,start,x,z,isWater);vertex(target,start+1,x,z+1,isWater);vertex(target,start+2,x+1,z,isWater);target.triangle(start);
+        vertex(target,start+3,x+1,z,isWater);vertex(target,start+4,x,z+1,isWater);vertex(target,start+5,x+1,z+1,isWater);target.triangle(start+3);
+        if(isWater)waterAt+=6;else at+=6;
+      }yield;
+    }
+    // Publish the large terrain/water surface as soon as it is ready. Anchor
+    // silhouettes are a separate, lower-priority pass; waiting for every crown
+    // box before publishing terrain left the whole distant world blank during
+    // initial load and profile changes.
+    const ground=terrain.geometry(),waterGeometry=water?.geometry();
+    this.publishTerrainWater(ground,waterGeometry,terrain.count/3,water?water.count/3:0);
+    yield;
     const anchors=new DistantBuffer(plan.boxes.length*36),colors=new Map<string,THREE.Color>();
     for(let first=0;first<plan.boxes.length;first+=32){
       for(let j=first;j<Math.min(first+32,plan.boxes.length);j++){
@@ -164,34 +196,36 @@ float shade=.72+.28*max(0.,dot(normalize(vNormal),sunDirection));vec3 c=vColor*l
       }yield;
     }
     const crown=anchors.geometry();this.pending.push(crown);yield;
-    // Keep the previous presentation until the complete replacement is ready.
-    this.terrain?.geometry.dispose();this.anchors?.geometry.dispose();this.group.clear();
-    this.terrain=new THREE.Mesh(ground,this.material);this.terrain.name="distant-terrain";this.anchors=new THREE.Mesh(crown,this.material);this.anchors.name="distant-anchors";this.group.add(this.terrain,this.anchors);this.pending.length=0;
-    this.stats.terrainTriangles=terrain.count/3;this.stats.anchorTriangles=anchors.count/3;this.stats.quality=this.profile.quality;this.stats.pendingQuality="";this.stats.ready=true;
+    if(this.anchors){this.renderAudit?.untag(this.anchors);this.group.remove(this.anchors);this.anchors.geometry.dispose();}
+    this.anchors=new THREE.Mesh(crown,this.material);this.anchors.name="distant-anchors";this.renderAudit?.tag(this.anchors,"distant-structures");
+    this.group.add(this.anchors);this.pending.length=0;
+    this.stats.anchorTriangles=anchors.count/3;this.stats.anchorsReady=true;this.stats.quality=this.profile.quality;this.stats.pendingQuality="";this.stats.ready=true;
   }
-  /** Reuses the bitmap, updating only entries changed by actual meshing/eviction. */
-  update(camera:Vec3,meshed:ReadonlySet<string>,atmosphere:Atmosphere,revision:number) {
-    if(this.disposed||!this.plan)return;
+  /** Publish the terrain/water foundation independently of optional skyline anchors. */
+  private publishTerrainWater(ground:THREE.BufferGeometry,waterGeometry:THREE.BufferGeometry|undefined,terrainTriangles:number,waterTriangles:number){
+    if(this.terrain){this.renderAudit?.untag(this.terrain);this.group.remove(this.terrain);this.terrain.geometry.dispose();}
+    if(this.distantWater){this.renderAudit?.untag(this.distantWater);this.group.remove(this.distantWater);this.distantWater.geometry.dispose();}
+    this.terrain=new THREE.Mesh(ground,this.material);this.terrain.name="distant-terrain";this.renderAudit?.tag(this.terrain,"distant-terrain");
+    this.distantWater=waterGeometry?new THREE.Mesh(waterGeometry,this.waterMaterial):undefined;
+    if(this.distantWater){this.distantWater.name="distant-water";this.distantWater.renderOrder=-1;this.renderAudit?.tag(this.distantWater,"water");}
+    this.group.add(this.terrain);if(this.distantWater)this.group.add(this.distantWater);
+    this.stats.terrainTriangles=terrainTriangles;this.stats.waterTriangles=waterTriangles;this.stats.terrainReady=true;
+  }
+  /** Reuses the bitmap and applies only renderer mesh-membership deltas. */
+  update(camera:Vec3,meshed:ReadonlySet<string>,atmosphere:Atmosphere,revision:number,
+    changes:readonly MeshCoverageChange[]=[],changeBase=0) {
+    // Distant geometry and coverage are render-only. Do not spend main-thread
+    // time building or reconciling them while the complete group is hidden
+    // (for example, when the camera is underground). The bounded generator and
+    // revision journal resume safely when the group becomes visible again.
+    if(this.disposed||!this.plan||!this.group.visible)return;
     if(this.work){const begin=performance.now();let slices=0;
       while(this.work&&slices++<8&&performance.now()-begin<2){if(this.work.next().done)this.work=undefined;}
       const elapsed=performance.now()-begin;this.stats.buildMs+=elapsed;this.stats.maxBuildSliceMs=Math.max(this.stats.maxBuildSliceMs,elapsed);
     }
-    if(revision!==this.lastRevision||this.world.navRevision!==this.lastNavRevision){
-      this.lastRevision=revision;this.lastNavRevision=this.world.navRevision;const marked=this.nextMarked,columns=this.coverageColumns;marked.clear();columns.clear();let changed=false;
-      const mark=(cx:number,sy:number,cz:number)=>{
-        const x=cx-this.plan!.originX/STEP,z=cz-this.plan!.originZ/STEP;if(x<0||z<0||x>=SIZE||z>=SIZE||sy<MIN_SECTION||sy>MAX_SECTION)return;
-        const i=x+(z+(sy-MIN_SECTION)*SIZE)*SIZE;marked.add(i);if(!this.coverage[i]){this.coverage[i]=255;changed=true;}
-      };
-      for(const key of meshed){let q=this.coordinates.get(key);if(!q){const[cx,sy,cz]=key.split(",").map(Number);q={cx,sy,cz,column:`${cx},${cz}`};this.coordinates.set(key,q);}mark(q.cx,q.sy,q.cz);columns.add(q.column);}
-      for(const key of this.coordinates.keys())if(!meshed.has(key))this.coordinates.delete(key);
-      // A fully known empty section needs no mesh. Once a column has rendered
-      // detail, suppress proxies in its authoritative air too: coarse slopes
-      // must not fill cliff cutouts or cleared space above shorter buildings.
-      for(const key of columns){const c=this.world.chunks.get(key);if(c)for(let sy=MIN_SECTION;sy<=MAX_SECTION;sy++)if(!c.blocks.sections.has(sy))mark(c.cx,sy,c.cz);}
-      for(const i of this.marked)if(!marked.has(i)){this.coverage[i]=0;changed=true;}
-      this.nextMarked=this.marked;this.marked=marked;if(changed)this.texture.needsUpdate=true;
-    }
-    const u=this.material.uniforms;u.cameraXZ.value.set(camera.x,camera.z);u.daylight.value=atmosphere.daylight;u.fogNear.value=atmosphere.fogNear;u.fogFar.value=atmosphere.fogFar;u.fogDetail.value=atmosphere.fogDetail;this.stats.updates++;
+    if(this.coverageIndex?.update(meshed,changes,revision,changeBase,this.world.navRevision))this.texture.needsUpdate=true;
+    const u=this.material.uniforms;u.cameraXZ.value.set(camera.x,camera.z);u.daylight.value=atmosphere.daylight;u.fogNear.value=atmosphere.fogNear;u.fogFar.value=atmosphere.fogFar;u.fogDetail.value=atmosphere.fogDetail;
+    const wu=this.waterMaterial.uniforms;wu.cameraXZ.value.set(camera.x,camera.z);wu.waterTint.value.copy(atmosphere.water);wu.fogColor.value.copy(atmosphere.fog);wu.lightTint.value.copy(atmosphere.light);wu.daylight.value=atmosphere.daylight;wu.fogNear.value=atmosphere.fogNear;wu.fogFar.value=atmosphere.fogFar;wu.fogDetail.value=atmosphere.fogDetail;this.stats.updates++;
   }
-  dispose() {if(this.disposed)return;this.disposed=true;this.work?.return(undefined);this.work=undefined;for(const g of this.pending)g.dispose();this.pending.length=0;this.terrain?.geometry.dispose();this.anchors?.geometry.dispose();this.material.dispose();this.texture.dispose();this.group.clear();this.group.removeFromParent();this.marked.clear();this.nextMarked.clear();this.coordinates.clear();this.coverageColumns.clear();this.coverage.fill(0);this.stats.ready=false;if(this.plan)this.plan.boxes.length=0;}
+  dispose() {if(this.disposed)return;this.disposed=true;this.work?.return(undefined);this.work=undefined;for(const g of this.pending)g.dispose();this.pending.length=0;if(this.terrain)this.renderAudit?.untag(this.terrain);if(this.distantWater)this.renderAudit?.untag(this.distantWater);if(this.anchors)this.renderAudit?.untag(this.anchors);this.terrain?.geometry.dispose();this.distantWater?.geometry.dispose();this.anchors?.geometry.dispose();this.material.dispose();this.waterMaterial.dispose();this.texture.dispose();this.group.clear();this.group.removeFromParent();this.coverageIndex?.clear();this.coverageIndex=undefined;this.coverage.fill(0);this.stats.terrainReady=false;this.stats.anchorsReady=false;this.stats.ready=false;if(this.plan)this.plan.boxes.length=0;}
 }

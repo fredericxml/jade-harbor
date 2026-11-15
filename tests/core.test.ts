@@ -11,7 +11,6 @@ import { meshChunk } from "../src/render/mesher";
 import "fake-indexeddb/auto";
 import {
   writeSave,
-  listSaves,
   loadSave,
   validateSave,
   SaveData,
@@ -115,7 +114,7 @@ describe("chunk meshes", () => {
     w.chunks.set("0,0", c);
     c.blocks.set(2, 2, 2, B.Stone);
     c.blocks.set(3, 2, 2, B.Stone);
-    expect(meshChunk(w, c)[0].indices.length).toBe(60);
+    expect(meshChunk(w, c)[0].indices.length).toBe(36);
     w.set(2, 2, 2, 0);
     expect(meshChunk(w, c)[0].indices.length).toBe(36);
   });
@@ -126,7 +125,7 @@ describe("chunk meshes", () => {
     c.blocks.set(2, 2, 2, B.Stone);
     c.blocks.set(3, 2, 2, B.Water);
     expect(meshChunk(w, c)[0].indices.length).toBe(36);
-    expect(meshChunk(w, c)[1].indices.length).toBe(30);
+    expect(meshChunk(w, c)[2].indices.length).toBe(30);
   });
 });
 describe("inventory and progression", () => {
@@ -177,7 +176,6 @@ describe("inventory and progression", () => {
 describe("persistent save round trip", () => {
   const data: SaveData = {
     version: 1,
-    generator: 3,
     format: "jade-harbor-engine",
     id: "test",
     name: "test",

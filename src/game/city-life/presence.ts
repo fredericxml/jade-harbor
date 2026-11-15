@@ -1,13 +1,13 @@
 import type { Vec3 } from "../../core/coords";
 import type { World } from "../../world/world";
-import { nearestRoadPoint, type UrbanLot, type UrbanRoad } from "../../world/metropolis/plan";
+import { nearestRoadPoint, type UrbanLot, type UrbanPlan, type UrbanRoad } from "../../world/metropolis/plan";
 import type { DistrictId } from "../../world/metropolis/districts";
 import { contains, inCity } from "../../world/city/plan";
 import { cityElevation } from "../../world/geography/terrain";
 import type { MacroPlan } from "../../world/geography/plan";
 import { buildingPoint, PROFESSIONS, type Profession } from "../professions";
 import { identityHash } from "./schedules";
-import type { PopulationPlan, ResidentPlan } from "./population";
+import type { PopulationPlan } from "./population";
 import { addStreetLife } from "./street-life";
 import type { FabricPlan } from "../../world/metropolis/fabric";
 
@@ -59,13 +59,12 @@ function streetCircuit(points: Vec3[], p: Vec3, reach: number, road: UrbanRoad, 
 
 /** Stable neighborhood addresses cover developed street cells, rather than
  * concentrating an entire district at one public midpoint. No voxel generation. */
-export function addNeighborhoodPopulation(world: World, base: PopulationPlan): PopulationPlan {
-  const urban = world.metropolisPlan, density = world.densityPlan;
+export function addNeighborhoodPopulation(world: World, base: PopulationPlan, priorUrban?: UrbanPlan): PopulationPlan {
+  const urban = priorUrban ?? world.metropolisPlan, density = world.densityPlan;
   if (!urban || !density) return base;
-  if(world.generatorVersion>=8&&"previousUrban" in density) {
-    const currentRoads=new Map(urban.roads.map(r=>[r.id,r])),prior=(density as FabricPlan).previousUrban;
-    const oldWorld={seed:world.seed,generatorVersion:7,metropolisPlan:prior,densityPlan:{...density,urban:prior},macroPlan:world.macroPlan,landmarkPlan:world.landmarkPlan} as unknown as World;
-    const released=addNeighborhoodPopulation(oldWorld,base);
+  if(!priorUrban&&"previousUrban" in density) {
+    const currentRoads=new Map<string,UrbanRoad>(urban.roads.map(r=>[r.id,r])),prior=(density as FabricPlan).previousUrban;
+    const released=addNeighborhoodPopulation(world,base,prior);
     // Resolve the frozen addresses first: moving/merging a lane must not rename
     // a cell and lose its released identities. Then fit their disposable routes
     // to v8's narrower/current street geometry, leaving real old home aisles.
@@ -85,8 +84,8 @@ export function addNeighborhoodPopulation(world: World, base: PopulationPlan): P
   }
   type Neighborhood = { id: string; district: DistrictId; lot: UrbanLot; road: UrbanRoad; point: Vec3; score: number; hub?: "landing" | "junction" };
   const cells = new Map<string, Neighborhood>(), samples = new Map<UrbanRoad, Vec3[]>();
-  const roads = urban.roads.filter(r => !r.owner), entries = new Map(urban.roads.filter(r => r.owner).map(r => [r.owner!, r]));
-  for (const lot of urban.lots) {
+  const roads = urban.roads.filter(r => !r.owner), entries = new Map<string,UrbanRoad>(urban.roads.filter(r => r.owner).map(r => [r.owner!, r]));
+  for (const lot of urban.lots as UrbanLot[]) {
     const policy = DISTRICT_PRESENCE[lot.districtId], access = entries.get(lot.id), end = access?.points.at(-1) ?? { ...lot.entrance, y: lot.baseY };
     const local = (urban.roadsByChunk.get(`${Math.floor(end.x / 16)},${Math.floor(end.z / 16)}`) ?? []).filter(r => !r.owner);
     let road: UrbanRoad | undefined, best = Infinity;

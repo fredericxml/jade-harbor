@@ -1,0 +1,7 @@
+{
+  "inputArchiveSha256": "a9a27fb061e542d32fbb4c559179b622f94bafdbf0197f9ade945189040efcae",
+  "originalSourceSha256": "382b101ce33c0b8c55e547fb3d9b2f8e87db6e43d9c7b5282f8338bd13aeea70",
+  "originalMethodSha256": "86adaa08098797e6fa9d7cd05b5e7e892a32ebcad9a49742441c336f9a07eb78",
+  "fixtureSha256": "b8b93b1faa0fa7b96a3236c2131c44a419d46c987813eb09ce5e4a3c9cb703c9",
+  "translation": "Exact original frame method, renamed/exported; pinned TypeScript5.9.3 removes only type syntax. Imports bind original referenced functions to unchanged current modules."
+}

@@ -341,7 +341,7 @@ export function opaque(value: number) {
   return block(value).opaque;
 }
 export type Box = [number, number, number, number, number, number];
-export function boxes(v: number): Box[] {
+function computeBoxes(v: number): Box[] {
   const b = block(v),
     s = stateOf(v);
   switch (b.shape) {
@@ -416,10 +416,24 @@ export function boxes(v: number): Box[] {
       return [[0, 0, 0, 1, 1, 1]];
   }
 }
-export const emits = (v: number) =>
-  block(v).emission ??
-  (idOf(v) === B.Lamp && stateOf(v) & 1
+
+// Collision boxes depend only on the packed block value. Physics, navigation
+// and meshing share these immutable-by-convention arrays instead of allocating
+// nested geometry for every query. The key space is bounded by packed states.
+const boxCache = new Map<number, Box[]>();
+export function boxes(v: number): Box[] {
+  let cached = boxCache.get(v);
+  if (!cached) {
+    cached = computeBoxes(v);
+    boxCache.set(v, cached);
+  }
+  return cached;
+}
+
+export const emits = (v: number, definition: BlockDef = block(v)) =>
+  definition.emission ??
+  (definition.id === B.Lamp && stateOf(v) & 1
     ? 14
-    : idOf(v) === B.Furnace && stateOf(v) & 1
+    : definition.id === B.Furnace && stateOf(v) & 1
       ? 12
       : 0);

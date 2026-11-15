@@ -1,0 +1,47 @@
+import {chromium} from 'playwright';
+import assert from 'node:assert/strict';
+import {mkdir,readFile,writeFile} from 'node:fs/promises';
+import {devApp,chromiumArgs,continueInBrowser} from './browser-harness.mjs';
+import {verifyReleaseManifest} from '../scripts/release-integrity.mjs';
+verifyReleaseManifest();
+const out=process.env.ADAPTIVE_BROWSER_OUTPUT??'test-results/adaptive-resolution';await mkdir(out,{recursive:true});
+const server=await devApp(4287);let browser,page;const checks=[],errors=[],observations={};
+try{
+ browser=await chromium.launch({headless:true,args:chromiumArgs});page=await browser.newPage({viewport:{width:640,height:360},acceptDownloads:true});page.setDefaultTimeout(180000);page.on('pageerror',e=>errors.push(e.message));
+ await page.addInitScript(()=>localStorage.setItem('jade-harbor-settings',JSON.stringify({graphicsQuality:'high',distance:3,simulationDistance:4})));
+ await page.goto(server.url);await continueInBrowser(page);
+ assert.deepEqual(await page.evaluate(()=>({quality:window.__game.settings.graphicsQuality,adaptive:window.__game.settings.adaptiveResolution,limit:window.__game.settings.frameRateLimit,scale:window.__game.view.resolutionScale})),{quality:'high',adaptive:false,limit:'auto',scale:1});
+ checks.push('High remains the default; new settings use Adaptive frame pacing while explicit saved display-rate choices remain intact');
+ await page.evaluate(async()=>{const g=window.__game,{freshWorld}=await import('/src/persistence/saves.ts');await g.start(freshWorld('Adaptive regression','jade-harbor','creative'));g.pause();});
+ await page.waitForFunction(()=>{const g=window.__game;return!g.opening&&!g.saveTask&&!g.world.pending.size&&!g.world.dirty.size&&g.view.distant.stats.ready;});
+ await page.evaluate(()=>{const g=window.__game;g.ui.settings(g.settings);});
+ await page.locator('#frameRateLimit').selectOption('60');await page.locator('#adaptiveResolution').selectOption('on');
+ const before=await page.evaluate(()=>{const g=window.__game,marker="__adaptive_pending_probe__";g.world.pending.add(marker);window.__adaptivePendingMarker=marker;window.__adaptivePendingSamples=0;window.__adaptiveObserveOriginal=g.adaptive.observe;const observe=g.adaptive.observe.bind(g.adaptive);g.adaptive.observe=function(...args){if(g.world.pending.has(marker))window.__adaptivePendingSamples++;return observe(...args);};window.__adaptiveIdentity={ids:g.entities.list.map(e=>e.id).sort(),body:{...g.body.position},css:{width:g.view.canvas.clientWidth,height:g.view.canvas.clientHeight},aspect:g.view.camera.aspect};g.body.flying=true;g.resume(false);return{at:performance.now(),buffer:{width:g.view.canvas.width,height:g.view.canvas.height},scale:g.view.resolutionScale};});
+ await page.waitForFunction(()=>['stable','limited'].includes(window.__game.adaptive.state),{},{timeout:90000});
+ observations.livePressure=await page.evaluate(b=>{const g=window.__game;return{elapsedMs:performance.now()-b.at,scale:g.view.resolutionScale,quality:g.settings.graphicsQuality,adaptiveState:g.adaptive.state,bottleneck:g.adaptive.bottleneck,decision:g.adaptive.decision,buffer:{width:g.view.canvas.width,height:g.view.canvas.height},css:{width:g.view.canvas.clientWidth,height:g.view.canvas.clientHeight},aspect:g.view.camera.aspect,metrics:g.view.metrics.snapshot(),capabilities:g.view.capabilities,idsUnchanged:JSON.stringify(g.entities.list.map(e=>e.id).sort())===JSON.stringify(window.__adaptiveIdentity.ids),residents:g.entities.list.filter(e=>e.kind==='villager').length,active:g.entities.life.active.size,pendingSamples:window.__adaptivePendingSamples};},before);
+ const p=observations.livePressure;assert(p.elapsedMs>=15000,p.elapsedMs);assert(p.scale>=.7&&p.scale<=1);assert.equal(p.quality,'high');assert.notEqual(p.adaptiveState,'off');assert(p.pendingSamples>100,`adaptive observations while chunk work is pending: ${p.pendingSamples}`);if(['cpu','render-cpu'].includes(p.bottleneck))assert.equal(p.scale,1,JSON.stringify(p));else if(['gpu','mixed','presentation'].includes(p.bottleneck))assert(p.scale<=.95,JSON.stringify(p));if(p.scale===1)assert.equal(p.buffer.width,before.buffer.width);else assert(p.buffer.width<before.buffer.width);assert.equal(p.residents,4080);assert(p.active<=96);assert(p.idsUnchanged);assert.deepEqual(p.css,{width:640,height:360});assert.equal(p.aspect,640/360);
+ await page.evaluate(()=>{const g=window.__game;g.world.pending.delete(window.__adaptivePendingMarker);g.adaptive.observe=window.__adaptiveObserveOriginal;});
+ checks.push('adaptive sampling continues during a pending chunk-work window, reports its CPU/GPU/presentation classification, and only lowers resolution for render-side pressure while preserving High geometry, resident identities, layout and aspect');
+ await page.evaluate(()=>{const g=window.__game;g.pause();g.ui.settings(g.settings);});
+ const beforePreset=await page.evaluate(()=>({scale:window.__game.view.resolutionScale,adaptive:window.__game.settings.adaptiveResolution}));
+ await page.locator('#graphicsQuality').selectOption('medium');
+ await page.waitForFunction(()=>window.__game.settings.graphicsQuality==='medium');
+ const afterPreset=await page.evaluate(()=>({scale:window.__game.view.resolutionScale,adaptive:window.__game.settings.adaptiveResolution}));
+ assert.equal(await page.locator('#adaptiveResolution').inputValue(),'on');
+ assert.equal(afterPreset.adaptive,true,'changing a preset must not disable Adaptive');
+ assert.equal(afterPreset.scale,beforePreset.scale,'changing a preset must preserve the Adaptive controller scale');
+ checks.push('manual preset changes update visual quality independently while preserving Adaptive ON and its current internal resolution scale');
+ const download=page.waitForEvent('download');await page.locator('[data-action="export-performance"]').click();const file=await download;const report=JSON.parse(await readFile(await file.path(),'utf8'));assert.equal(file.suggestedFilename(),'jade-harbor-performance.json');assert.equal(report.schema,1);assert.equal(report.graphics.quality,'medium');assert.equal(typeof report.graphics.decision,'string');assert(Number.isInteger(report.graphics.adaptiveSampleCount));assert(report.capabilities.maxRenderbufferSize>0);for(const key of['seed','worldId','player','name','saveRevision'])assert(!Object.hasOwn(report,key));assert(!JSON.stringify(report).includes('Adaptive regression'));
+ checks.push('local JSON report downloads bounded timing/resource/capability data without world or player identifiers');
+ await page.locator('#graphicsQuality').selectOption('low');await page.locator('#frameRateLimit').selectOption('30');
+ await page.evaluate(()=>{const g=window.__game;g.resume(false);const probe={draws:0,polls:0,duplicates:0,last:-1};window.__capProbe=probe;const render=g.view.render,poll=g.input.poll,frame=g.frame;g.view.render=function(...a){probe.draws++;return render.apply(this,a);};g.input.poll=function(...a){probe.polls++;return poll.apply(this,a);};g.frame=function(t){if(t===probe.last)probe.duplicates++;probe.last=t;return frame.call(this,t);};});
+ await page.waitForTimeout(1500);const start=await page.evaluate(()=>({draws:window.__capProbe.draws,polls:window.__capProbe.polls,ticks:window.__game.tickCount,at:performance.now()}));await page.waitForTimeout(3500);
+ observations.cap=await page.evaluate(b=>({draws:window.__capProbe.draws-b.draws,polls:window.__capProbe.polls-b.polls,ticks:window.__game.tickCount-b.ticks,seconds:(performance.now()-b.at)/1000,duplicates:window.__capProbe.duplicates,limit:window.__game.settings.frameRateLimit}),start);
+ const c=observations.cap;assert(c.draws/c.seconds<=31.5,JSON.stringify(c));assert(c.ticks>=60&&c.ticks<=80,JSON.stringify(c));assert(c.polls>=c.draws);assert.equal(c.duplicates,0);assert.equal(c.limit,30);
+ checks.push('native30FPS presentation cap retains ordinary20Hz simulation and input polling on the single existing RAF');
+ await page.evaluate(()=>{const g=window.__game;g.pause();g.ui.settings(g.settings);});await page.locator('[data-action="reset-settings"]').click();
+ const reset=await page.evaluate(()=>({quality:window.__game.settings.graphicsQuality,adaptive:window.__game.settings.adaptiveResolution,limit:window.__game.settings.frameRateLimit,scale:window.__game.view.resolutionScale}));assert.deepEqual(reset,{quality:'high',adaptive:false,limit:'auto',scale:1});
+ checks.push('Reset to defaults restores High, full resolution, adaptation Off and Auto frame pacing');
+ assert.deepEqual(errors,[]);verifyReleaseManifest();await writeFile(out+'/results.json',JSON.stringify({status:'passed',browser:browser.version(),checks,observations,errors,note:'Actual Chromium engine loop and WebGL backbuffer. SwiftShader frame pressure is software performance, not physical phone performance. No GPU execution or temperature claim.'},null,2));console.log('ADAPTIVE BROWSER PASSED',checks.length);
+}catch(error){await page?.screenshot({path:out+'/failure.png'}).catch(()=>{});await writeFile(out+'/failure.json',JSON.stringify({error:String(error),checks,observations,errors},null,2));throw error;}
+finally{await browser?.close();await server.close();}

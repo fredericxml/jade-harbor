@@ -17,7 +17,7 @@ try {
   browser=await chromium.launch({headless:true,args:["--no-sandbox","--use-angle=swiftshader","--enable-unsafe-swiftshader","--disable-dev-shm-usage"]});
   page=await browser.newPage({viewport:{width:1280,height:900}});page.setDefaultTimeout(60000);page.on("pageerror",e=>{errors.push(e.message);console.log("PAGE_ERROR",e.message);});
   await mkdir("test-results/upgrade",{recursive:true});await page.goto("http://127.0.0.1:4181");
-  await page.getByRole("button",{name:"Create a world"}).click();await page.locator("#world-name").fill("Apothecary integration");await page.locator("#world-mode").selectOption("survival");await page.getByRole("button",{name:"Enter your world"}).click();
+  await page.locator('[data-action="new"]').click();await page.locator("#world-name").fill("Apothecary integration");await page.locator("#world-mode").selectOption("survival");await page.locator('[data-action="create"]').click();
   await page.waitForFunction(()=>window.__game.active);
   // Explicit integration fixture: safe pad and ingredients, not the no-cheat progression acceptance.
   await page.evaluate(()=>{const g=window.__game;g.settings.distance=3;g.applySettings();g.entities.list=[];g.inventory.slots=Array(36).fill(null);

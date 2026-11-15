@@ -1,147 +1,102 @@
+import { InputState, type InputAction, type InputContext, type InputCommand } from "./input-state";
+import { DesktopInputAdapter } from "./desktop-input";
+import { TouchInputAdapter } from "./touch-input";
+import { GamepadInputAdapter } from "./gamepad-input";
+/** One runtime input owner. Pointer lock belongs only to the desktop adapter. */
 export class Input {
-  keys = new Set<string>();
-  left = false;
-  right = false;
-  leftPressed = false;
-  locked = false;
-  // A deliberate UI transition must not be mistaken for an unexpected lock loss.
-  private pendingIntentionalUnlock = false;
-  private lockRequestNumber = 0;
-  private externalUnlockTimer: ReturnType<typeof setTimeout> | null = null;
-  // Closing a modal is not a fresh gameplay lock acquisition. In particular,
-  // Escape may release pointer lock *after* its keyboard event has fired.
-  private suppressUnexpectedUnlock = false;
-  private ignoreNativeEscapeUntil = 0;
-  private lockAcquiredAt = 0;
-  onLook?: (x: number, y: number) => void;
-  onKey?: (key: string) => void;
-  onWheel?: (delta: number) => void;
-  onUnlock?: () => void;
-  onUse?: () => void;
-  constructor(public canvas: HTMLCanvasElement) {
-    document.addEventListener("pointerlockchange", () => {
-      const wasLocked = this.locked;
-      this.locked = document.pointerLockElement === canvas;
-      if (this.locked) {
-        this.pendingIntentionalUnlock = false;
-        this.suppressUnexpectedUnlock = false;
-        this.lockAcquiredAt = performance.now();
-        return;
-      }
-      this.clear();
-      if (this.pendingIntentionalUnlock) {
-        this.pendingIntentionalUnlock = false;
-        return;
-      }
-      if (this.suppressUnexpectedUnlock || performance.now() - this.lockAcquiredAt < 450) return;
-      // Ignore redundant unlock events and late events after opening/closing UI.
-      // Only an actual unexpected transition out of an acquired lock can pause.
-      if (wasLocked) {
-        // Some browsers report Escape's implicit pointer unlock before its
-        // keydown event. Give the keyboard toggle a chance to handle it first.
-        this.cancelExternalUnlock();
-        this.externalUnlockTimer = setTimeout(() => {
-          this.externalUnlockTimer = null;
-          if (!this.locked && !this.suppressUnexpectedUnlock) {
-            // Some browsers deliver the native Escape keydown after unlocking.
-            // It belongs to this Pause, not a request to close it again.
-            this.ignoreNativeEscapeUntil = performance.now() + 250;
-            this.onUnlock?.();
-          }
-        }, 80);
-      }
-    });
-    document.addEventListener("mousemove", (e) => {
-      if (this.locked) this.onLook?.(e.movementX, e.movementY);
-    });
-    document.addEventListener("keydown", (e) => {
-      if (e.code === "Escape") {
-        if (performance.now() < this.ignoreNativeEscapeUntil) {
-          e.preventDefault();
-          return;
+    readonly state = new InputState();
+    readonly desktop: DesktopInputAdapter;
+    readonly touch: TouchInputAdapter;
+    readonly gamepad: GamepadInputAdapter;
+    private wantedContext: InputContext = "gameplay";
+    private focused = true;
+    private disposed = false;
+    private blur = () => { this.focused = false; this.clear(); this.state.setContext("suspended"); };
+    private focus = () => {
+        if (!document.hidden) {
+            this.focused = true;
+            this.clear();
+            this.state.setContext(this.wantedContext);
         }
-        this.cancelExternalUnlock();
-        e.preventDefault();
-        if (!e.repeat) this.onKey?.("Escape");
-        return;
-      }
-      if (
-        e.target instanceof HTMLInputElement ||
-        e.target instanceof HTMLSelectElement ||
-        e.target instanceof HTMLTextAreaElement
-      )
-        return;
-      if (["Space", "Tab", "F3", "F5"].includes(e.code)) e.preventDefault();
-      if (!e.repeat) this.onKey?.(e.code);
-      if (this.locked) this.keys.add(e.code);
-    });
-    document.addEventListener("keyup", (e) => this.keys.delete(e.code));
-    canvas.addEventListener("mousedown", (e) => {
-      if (!this.locked) return;
-      if (e.button === 0) {
-        this.left = true;
-        this.leftPressed = true;
-      }
-      if (e.button === 2) {
-        this.right = true;
-        this.onUse?.();
-      }
-    });
-    document.addEventListener("mouseup", (e) => {
-      if (e.button === 0) this.left = false;
-      if (e.button === 2) this.right = false;
-    });
-    canvas.addEventListener("contextmenu", (e) => e.preventDefault());
-    canvas.addEventListener(
-      "wheel",
-      (e) => {
-        e.preventDefault();
-        if (this.locked) this.onWheel?.(Math.sign(e.deltaY));
-      },
-      { passive: false },
-    );
-    addEventListener("blur", () => this.clear());
-  }
-  private cancelExternalUnlock() {
-    if (this.externalUnlockTimer !== null) {
-      clearTimeout(this.externalUnlockTimer);
-      this.externalUnlockTimer = null;
+    };
+    private visibility = () => {
+        if (document.hidden)
+            this.blur();
+        else
+            this.focus();
+    };
+    onLook?: (x: number, y: number) => void;
+    onCommand?: (command: Readonly<InputCommand>) => void;
+    onUnlock?: () => void;
+    onClear?: () => void;
+    constructor(public canvas: HTMLCanvasElement) {
+        this.desktop = new DesktopInputAdapter(canvas, this.state);
+        this.touch = new TouchInputAdapter(this.state);
+        this.gamepad = new GamepadInputAdapter(this.state);
+        this.desktop.onUnlock = () => this.onUnlock?.();
+        this.desktop.onLifecycleClear = () => this.clear();
+        this.state.onCommand = c => this.onCommand?.(c);
+        this.state.onQueued = () => this.state.flush();
+        window.addEventListener("blur", this.blur);
+        window.addEventListener("pagehide", this.blur);
+        window.addEventListener("focus", this.focus);
+        document.addEventListener("visibilitychange", this.visibility);
     }
-  }
-  // Called when the UI closes. A delayed native pointer-unlock must never
-  // reopen it while the player is waiting to click back into the game.
-  prepareResume() {
-    this.cancelExternalUnlock();
-    this.suppressUnexpectedUnlock = true;
-  }
-  async lock() {
-    this.prepareResume();
-    const request = ++this.lockRequestNumber;
-    try {
-      await this.canvas.requestPointerLock();
-      if (request === this.lockRequestNumber &&
-          document.pointerLockElement === this.canvas) {
-        this.locked = true;
-        this.pendingIntentionalUnlock = false;
-        this.suppressUnexpectedUnlock = false;
-        this.lockAcquiredAt = performance.now();
-      }
-    } catch {
-      // Browsers may reject a lock immediately after Escape. Keep the pause
-      // dialog closed; a normal click on the game canvas can acquire the lock.
+    get locked() { return this.desktop.locked; }
+    set locked(value: boolean) { this.desktop.locked = value; }
+    set mouseSensitivity(value: number) { this.desktop.mouseSensitivity = Number.isFinite(value) ? Math.max(1, Math.min(12, value)) : 4; }
+    read() { this.desktop.syncKeys(); return this.state.read(); }
+    readTick(useReady = true) { this.desktop.syncKeys(); this.state.flush(true, useReady); return this.state.read(); }
+    held(action: InputAction) { return this.state.held(action); }
+    pressed(action: InputAction) { return this.state.pressed(action); }
+    consumeTick() { this.state.consumeTick(); }
+    poll(dt: number) {
+        if (this.disposed)
+            return;
+        this.gamepad.poll(dt);
+        this.state.flush();
+        const f = this.state.read();
+        if (this.state.context === "gameplay" && (f.lookX || f.lookY))
+            this.onLook?.(f.lookX, f.lookY);
+        this.state.consumeLook();
     }
-  }
-  unlock() {
-    this.cancelExternalUnlock();
-    ++this.lockRequestNumber;
-    if (document.pointerLockElement === this.canvas || this.locked) {
-      this.pendingIntentionalUnlock = true;
-      document.exitPointerLock();
+    clear() { this.desktop.clear(); this.touch.clear(); this.gamepad.clear(); this.state.clear(); this.onClear?.(); }
+    setContext(context: InputContext) {
+        this.wantedContext = context;
+        if (this.state.context !== (this.focused ? context : "suspended")) {
+            this.clear();
+            this.state.setContext(this.focused ? context : "suspended");
+        }
     }
-    this.clear();
-  }
-  clear() {
-    this.keys.clear();
-    this.left = this.right = this.leftPressed = false;
-  }
+    /** Persisted pageshow may have no separate focus event. Restores UI only. */
+    restoreUIFocus() { this.focused = !document.hidden; this.setContext("ui"); this.clear(); }
+    prepareResume() { this.clear(); this.setContext("gameplay"); this.desktop.prepareResume(); }
+    lock() { return this.desktop.lock(); }
+    unlock() { this.setContext("ui"); this.clear(); this.desktop.unlock(); }
+    dispose() {
+        if (this.disposed)
+            return;
+        this.clear();
+        this.disposed = true;
+        this.desktop.dispose();
+        this.touch.dispose();
+        this.gamepad.dispose();
+        window.removeEventListener("blur", this.blur);
+        window.removeEventListener("pagehide", this.blur);
+        window.removeEventListener("focus", this.focus);
+        document.removeEventListener("visibilitychange", this.visibility);
+        this.state.onQueued = this.state.onCommand = undefined;
+    }
+    // Deprecated desktop QA compatibility. Gameplay never reads these fields.
+    get keys() { return this.desktop.keys; }
+    get left() { return this.held("primary"); }
+    set left(v: boolean) { this.state.setAction("mouse", "primary", v); }
+    get right() { return this.held("secondary"); }
+    set right(v: boolean) { this.state.setAction("mouse", "secondary", v); }
+    get leftPressed() { return this.pressed("primary"); }
+    set leftPressed(v: boolean) {
+        if (!v)
+            this.state.consumePressed("primary");
+    }
+    set onKey(callback: ((code: string) => void) | undefined) { this.desktop.onKey = callback; }
 }

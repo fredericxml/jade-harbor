@@ -12,6 +12,9 @@ require.extensions['.ts'] = (m, f) => m._compile(ts.transpileModule(fs.readFileS
 const { B, block } = require('../src/world/blocks.ts');
 const coords = require('../src/core/coords.ts');
 const {graphicsQuality,graphicsProfile}=require('../src/render/graphics.ts');
+const {touchMode,touchSensitivity}=require('../src/ui/touch-controls.ts');
+const {frameRateLimit}=require('../src/render/frame-pacer.ts');
+const {AdaptiveResolution}=require('../src/render/adaptive-resolution.ts');
 const { item } = require('../src/game/items.ts');
 const { Inventory } = require('../src/game/inventory.ts');
 const { Entities, spawnEntity } = require('../src/game/entities.ts');
@@ -38,12 +41,12 @@ function gameMethods(names) {
     compilerOptions: { target: ts.ScriptTarget.ES2022 },
   }).outputText;
   return Function(
-    'B','block','item','POTIONS','Inventory','MIN_Y','MAX_Y','collides','idOf','clamp','graphicsQuality','graphicsProfile',
+    'B','block','item','POTIONS','Inventory','MIN_Y','MAX_Y','collides','idOf','clamp','graphicsQuality','graphicsProfile','touchMode','touchSensitivity','frameRateLimit',
     `${js};return AuditGame`,
   )(
     B, block, item, POTIONS, Inventory, coords.MIN_Y, coords.MAX_Y,
     (_world, p) => p.y <= 100,
-    coords.idOf, coords.clamp, graphicsQuality, graphicsProfile,
+    coords.idOf, coords.clamp, graphicsQuality, graphicsProfile, touchMode, touchSensitivity, frameRateLimit,
   );
 }
 
@@ -168,7 +171,7 @@ function potionGame(potionCount, fillOtherSlots, dropResult) {
   }
   game.target = () => null;
   game.direction = () => ({ x: 0, y: 0, z: -1 });
-  game.input = { keys: new Set() };
+  game.input = { held:()=>false };
   game.entities = {
     target: () => null,
     dropCalls: 0,
@@ -211,6 +214,7 @@ test('Potion use preserves empty flask under full inventory/drop-pool pressure',
 // NaN/Infinity into the Three.js camera/fog or input calculations.
 test('applySettings sanitizes corrupt persisted numeric values', () => {
   const game = new AuditGame();
+  game.adaptive = new AdaptiveResolution();
   game.settings = {
     fov: NaN,
     distance: Infinity,
@@ -221,14 +225,16 @@ test('applySettings sanitizes corrupt persisted numeric values', () => {
   let projectionUpdates = 0;
   game.view = {
     setGraphicsProfile(profile){this.graphicsProfile=profile;},
+    setResolutionScale(scale){this.resolutionScale=scale;},
     camera: { fov: 0, updateProjectionMatrix() { projectionUpdates++; } },
     scene: { fog: { near: 0, far: 0 } },
   };
   game.audio = { volume: -1 };
   game.effects={setRainCount(count){this.rainCount=count;}};
   game.applySettings();
-  assert.deepEqual(game.settings, { fov: 75, distance: 5, simulationDistance: 4, sensitivity: 4, volume: 30,graphicsQuality:"medium" });
+  assert.deepEqual(game.settings, { fov: 75, distance: 5, simulationDistance: 4, sensitivity: 4, volume: 30,graphicsQuality:"medium",adaptiveResolution:false,frameRateLimit:0,touchControls:"auto",touchSensitivity:1 });
   assert.equal(game.view.graphicsProfile,graphicsProfile("medium"));
+  assert.equal(game.view.resolutionScale,1);
   assert.equal(game.effects.rainCount,180);
   assert.equal(game.view.camera.fov, 75);
   assert.equal(game.view.distance, 5, "validated distance is passed to the atmosphere owner");

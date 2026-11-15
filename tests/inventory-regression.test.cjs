@@ -94,13 +94,14 @@ test('UI DOM drag event dispatches one logical move with correct original indice
  const {UI}=require('../src/ui/ui.ts');
  const handlers={};
  const fakeOverlay={addEventListener(type,fn){handlers[type]=fn;},className:'',innerHTML:''};
- const fakeRoot={innerHTML:'',querySelector(selector){
+ const rootHandlers={};
+ const fakeRoot={innerHTML:'',addEventListener(type,fn){rootHandlers[type]=fn;},querySelector(selector){
   if(selector==='#overlay')return fakeOverlay;
   if(selector==='#hud')return {hidden:true};
   if(selector==='#toast')return {textContent:'',classList:{add(){},remove(){}}};
   return null;
  }};
- const ui=new UI(fakeRoot);ui.screen='inventory';
+ const ui=new UI(fakeRoot);ui.screen='inventory';rootHandlers.pointerdown({pointerType:'touch'});assert.equal(ui.pointerType,'touch');rootHandlers.pointerdown({pointerType:'mouse'});assert.equal(ui.pointerType,'mouse');
  const events=[];ui.onMove=(...args)=>events.push(args);ui.onAction=()=>{throw Error('Unexpected click action');};
  const element=(action,index,filled=true)=>({dataset:{action,index:String(index)},
   getAttribute(name){return name==='draggable'?String(filled):null;},
@@ -115,7 +116,7 @@ test('UI DOM drag event dispatches one logical move with correct original indice
 test('UI ignores unsupported cross-screen and empty source drags',()=>{
  const {UI}=require('../src/ui/ui.ts');const handlers={};
  const fakeOverlay={addEventListener(type,fn){handlers[type]=fn;},className:'',innerHTML:''};
- const ui=new UI({innerHTML:'',querySelector(s){return s==='#overlay'?fakeOverlay:s==='#hud'?{hidden:true}:s==='#toast'?{}:null;}});
+ const ui=new UI({innerHTML:'',addEventListener(){},querySelector(s){return s==='#overlay'?fakeOverlay:s==='#hud'?{hidden:true}:s==='#toast'?{}:null;}});
  const elem=(act,index,filled)=>({dataset:{action:act,index:String(index)},getAttribute:()=>String(filled),closest(){return this;}});
  const e=t=>({target:t,preventDefault(){},dataTransfer:{setData(){}}});let calls=0;ui.onMove=()=>calls++;
  ui.screen='inventory';handlers.dragstart(e(elem('slot',20,false)));handlers.drop(e(elem('slot',3,true)));

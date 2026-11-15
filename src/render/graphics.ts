@@ -6,7 +6,6 @@ export interface GraphicsProfile {
   readonly renderScale: number;
   readonly dprCap: number;
   readonly distantTerrainStep: number;
-  readonly crownBuildingsPerDistrict: number;
   readonly residentFullDistance: number;
   readonly residentMidDistance: number;
   readonly farAnimationHz: number;
@@ -15,14 +14,20 @@ export interface GraphicsProfile {
 }
 export const GRAPHICS_QUALITIES = ["low", "medium", "high"] as const;
 export const GRAPHICS_PROFILES: Readonly<Record<GraphicsQuality, GraphicsProfile>> = Object.freeze({
-  low: Object.freeze({quality:"low",label:"Low",renderScale:.7,dprCap:1,distantTerrainStep:48,crownBuildingsPerDistrict:1,residentFullDistance:16,residentMidDistance:32,farAnimationHz:8,rainParticleCount:90,cloudCount:16}),
-  medium: Object.freeze({quality:"medium",label:"Medium",renderScale:.88,dprCap:1.25,distantTerrainStep:32,crownBuildingsPerDistrict:2,residentFullDistance:24,residentMidDistance:48,farAnimationHz:15,rainParticleCount:180,cloudCount:22}),
-  high: Object.freeze({quality:"high",label:"High",renderScale:1,dprCap:1.6,distantTerrainStep:16,crownBuildingsPerDistrict:4,residentFullDistance:960,residentMidDistance:960,farAnimationHz:60,rainParticleCount:300,cloudCount:28}),
+  low: Object.freeze({quality:"low",label:"Low",renderScale:.7,dprCap:1,distantTerrainStep:48,residentFullDistance:16,residentMidDistance:32,farAnimationHz:8,rainParticleCount:90,cloudCount:16}),
+  medium: Object.freeze({quality:"medium",label:"Medium",renderScale:.88,dprCap:1.25,distantTerrainStep:32,residentFullDistance:24,residentMidDistance:48,farAnimationHz:15,rainParticleCount:180,cloudCount:22}),
+  high: Object.freeze({quality:"high",label:"High",renderScale:1,dprCap:1.6,distantTerrainStep:16,residentFullDistance:960,residentMidDistance:960,farAnimationHz:60,rainParticleCount:300,cloudCount:28}),
 });
 export function graphicsQuality(value: unknown): GraphicsQuality {
   return value === "low" || value === "high" || value === "medium" ? value : "medium";
 }
 export function graphicsProfile(value: unknown): GraphicsProfile { return GRAPHICS_PROFILES[graphicsQuality(value)]; }
+
+/** Stable numeric shader selector: Low=0, Medium=1, High=2. */
+export function graphicsQualityLevel(value: GraphicsQuality | GraphicsProfile): number {
+  const quality = typeof value === "string" ? value : value.quality;
+  return quality === "high" ? 2 : quality === "medium" ? 1 : 0;
+}
 export function effectivePixelRatio(profile: GraphicsProfile, deviceRatio: number): number {
   const ratio=Number.isFinite(deviceRatio)&&deviceRatio>0?deviceRatio:1;
   // Preserve very low device ratios without accidental supersampling. DOM/CSS

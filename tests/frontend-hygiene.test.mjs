@@ -74,8 +74,19 @@ assert.match(sourceHtml, /<div id="app"><\/div>/);
 
 const pkg = JSON.parse(readFileSync("package.json", "utf8"));
 const lock = JSON.parse(readFileSync("package-lock.json", "utf8"));
-assert.equal(pkg.version, "2.0.1", "final release must retain its explicit release version");
+assert.equal(pkg.version, "2.1.0", "frontend package identity must match the public release version");
 assert.equal(lock.version, pkg.version);
 assert.equal(lock.packages[""].version, pkg.version);
 
-console.log("PASS frontend CSS/HTML hygiene and release version consistency");
+const gameSource = readFileSync("src/core/game.ts", "utf8");
+const lifecycleSetup = gameSource.indexOf("this.lifecycle=new BrowserLifecycle");
+const frameStart = gameSource.indexOf("requestAnimationFrame((t) => this.frame(t))");
+assert(lifecycleSetup >= 0 && frameStart > lifecycleSetup, "the game loop must start only after synchronous subsystems initialize");
+const rendererSource = readFileSync("src/render/renderer.ts", "utf8");
+assert.match(rendererSource, /new THREE\.WebGLRenderer\(\{/);
+assert.match(rendererSource, /context: selected\.context/);
+assert.match(rendererSource, /antialias: selected\.antialias/);
+assert.match(rendererSource, /powerPreference: selected\.powerPreference/);
+assert.match(readFileSync("src/main.ts", "utf8"), /startupFailurePresentation/, "startup errors must be classified instead of all being labelled WebGL2 failures");
+
+console.log("PASS frontend CSS/HTML hygiene, startup diagnostics, renderer context fallback and release version consistency");

@@ -1,38 +1,149 @@
-// Controlled shader-placement experiment, separate from hardware FPS claims.
-import {chromium} from 'playwright';
-import {spawn} from 'node:child_process';
-import {mkdir,writeFile,readFile} from 'node:fs/promises';
-import {createHash} from 'node:crypto';
+// Matched-scene browser check for the renderer-only High / Medium / Low
+// shader paths. GPU timing is asynchronous and optional; no gl.finish() is used.
+import { chromium } from 'playwright';
+import { spawn } from 'node:child_process';
+import { mkdir, writeFile, readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
-import {verifyReleaseManifest} from '../scripts/release-integrity.mjs';
-verifyReleaseManifest();const source=createHash('sha256').update(JSON.stringify(JSON.parse(await readFile('dist/release-integrity.json','utf8')).source)).digest('hex');
-const output=process.env.ATMOSPHERE_PROFILE_OUTPUT??'test-results/atmosphere-material-profile',records=[],errors=[];
-const server=spawn(process.execPath,['node_modules/vite/bin/vite.js','--host','127.0.0.1','--port','4193','--strictPort'],{stdio:['ignore','pipe','pipe']});let browser,page;
-try{
- await mkdir(output,{recursive:true});await new Promise((ok,no)=>{server.stdout.on('data',d=>{if(d.toString().includes('Local:'))ok();});server.on('exit',c=>no(Error('server '+c)));});browser=await chromium.launch({headless:true,args:['--no-sandbox','--use-angle=swiftshader','--enable-unsafe-swiftshader','--disable-dev-shm-usage']});page=await browser.newPage({viewport:{width:960,height:600}});page.setDefaultTimeout(180000);page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')errors.push(m.text());});
- await page.addInitScript(()=>localStorage.setItem('jade-harbor-settings',JSON.stringify({distance:3,simulationDistance:4})));
- await page.goto('http://127.0.0.1:4193');await page.locator('[data-action="new"]').click();await page.locator('[data-action="create"]').click();await page.waitForFunction(()=>window.__game?.active);
- await page.evaluate(()=>{
-  const g=window.__game;g.pause();g.frame=()=>{};const p={x:132.5,y:21.002,z:-100.5};g.body.position={...p};g.previous={...p};g.view.camera.position.set(p.x,p.y+1.61,p.z);g.view.camera.rotation.set(-.035,-Math.PI/2,0,'YXZ');
-  for(const key of g.world.stream(p.x,p.z,3))g.view.remove(key);for(let z=-3;z<=3;z++)for(let x=-3;x<=3;x++)if(x*x+z*z<=12.25)g.world.ensure(Math.floor(p.x/16)+x,Math.floor(p.z/16)+z,true);g.lighting.rebuild();for(let i=0;i<512&&g.world.dirty.size;i++)g.view.rebuild(g.world,6);
-  g.entities.life.reactivate();g.entities.life.prepare(g.entities.list,p,.25,false,g.entities.elapsed,g.entities.navigation);g.entityView.update(g.entities,g.entities.elapsed);g.view.hand.visible=false;g.ui.overlay.style.display='none';for(let i=0;i<512&&!g.view.distant.stats.ready;i++)g.view.updateDistant(g.world);
-  const pattern=/vec2 commercial=[\s\S]*?float hierarchy=[^;]+;/;
-  window.__materialVariants=g.view.materials.map(m=>{
-    const v=m.vertexShader,f=m.fragmentShader,block=f.match(pattern)?.[0]??v.match(pattern)?.[0];if(!block)throw Error('Missing hierarchy experiment target');
-    let baseV=v.replace(pattern,'').replace('vHierarchy=hierarchy;',''),baseF=f.replace(pattern,'float hierarchy=vHierarchy;');
-    if(!baseV.includes('uniform float night;'))baseV='uniform float night;'+baseV;
-    if(!baseV.includes('varying float vHierarchy;'))baseV='varying float vHierarchy;'+baseV;
-    if(!baseF.includes('varying float vHierarchy;'))baseF='varying float vHierarchy;'+baseF;
-    return{fragment:{vertex:baseV,fragment:baseF.replace('float hierarchy=vHierarchy;',block)},vertex:{vertex:baseV.replace('vec4 mv=',block+'vHierarchy=hierarchy;vec4 mv='),fragment:baseF}};
+import { verifyReleaseManifest } from '../scripts/release-integrity.mjs';
+
+verifyReleaseManifest();
+const source = createHash('sha256')
+  .update(JSON.stringify(JSON.parse(await readFile('dist/release-integrity.json', 'utf8')).source))
+  .digest('hex');
+const output = process.env.ATMOSPHERE_PROFILE_OUTPUT ?? 'test-results/atmosphere-material-profile';
+const records = [], errors = [];
+const server = spawn(process.execPath, ['node_modules/vite/bin/vite.js', '--host', '127.0.0.1', '--port', '4193', '--strictPort'], { stdio: ['ignore', 'pipe', 'pipe'] });
+let browser, page;
+const percentile = (values, p) => {
+  if (!values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * p))];
+};
+try {
+  await mkdir(output, { recursive: true });
+  await new Promise((resolve, reject) => {
+    server.stdout.on('data', data => { if (data.toString().includes('Local:')) resolve(); });
+    server.on('exit', code => reject(Error(`Vite exited with ${code}`)));
   });
- });
- for(const hour of[12,23])for(let lap=0;lap<3;lap++)for(const variant of(lap%2?['vertex','fragment']:['fragment','vertex'])){
-  const result=await page.evaluate(({hour,variant})=>{
-   const g=window.__game,v=g.view;v.atmosphere.reset((hour-6)/24,false,3);v.environment((hour-6)/24);v.updateDistant(g.world);
-   v.materials.forEach((m,i)=>{m.vertexShader=window.__materialVariants[i][variant].vertex;m.fragmentShader=window.__materialVariants[i][variant].fragment;m.needsUpdate=true;});
-   const gl=v.renderer.getContext();for(let i=0;i<4;i++){v.render();gl.finish();}const samples=[];for(let i=0;i<16;i++){const t=performance.now();v.render();gl.finish();samples.push(performance.now()-t);}v.render();gl.finish();return{samples,render:{...v.worldRenderStats},png:v.canvas.toDataURL('image/png')};
-  },{hour,variant});
-  if(lap===2)await writeFile(`${output}/${hour}-${variant}.png`,Buffer.from(result.png.split(',')[1],'base64'));delete result.png;records.push({hour,lap,variant,...result});console.log('MATERIAL PROFILE',hour,lap,variant);
- }
- const q=(a,p)=>[...a].sort((a,b)=>a-b)[Math.floor((a.length-1)*p)],summary=[12,23].map(hour=>{const samples=variant=>records.filter(r=>r.hour===hour&&r.variant===variant).flatMap(r=>r.samples),f=samples('fragment'),v=samples('vertex');return{hour,fragmentMedian:q(f,.5),vertexMedian:q(v,.5),ratio:q(v,.5)/q(f,.5),fragmentP95:q(f,.95),vertexP95:q(v,.95),samplesPerVariant:f.length};});assert.deepEqual(errors,[]);verifyReleaseManifest();await writeFile(`${output}/results.json`,JSON.stringify({status:'measured',source,summary,records,errors,note:'Same paused camera, exact geometry/residents/uniforms; alternated shader placement, four warm draws and sixteen render+gl.finish wall-time samples per block. SwiftShader CPU/GPU completion diagnostic, not elapsed gameplay FPS or physical GPU timing. PNG equality must be checked independently.'},null,2));console.log(JSON.stringify(summary));
-}catch(e){await writeFile(`${output}/failure.json`,JSON.stringify({source,error:String(e),records,errors},null,2));throw e;}finally{await browser?.close();server.kill();}
+  browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--disable-dev-shm-usage'] });
+  page = await browser.newPage({ viewport: { width: 960, height: 600 } });
+  page.setDefaultTimeout(180000);
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+  await page.addInitScript(() => localStorage.setItem('jade-harbor-settings', JSON.stringify({ distance: 3, simulationDistance: 4 })));
+  await page.goto('http://127.0.0.1:4193');
+  await page.locator('[data-action="new"]').click();
+  await page.locator('[data-action="create"]').click();
+  await page.waitForFunction(() => window.__game?.active);
+  await page.evaluate(() => {
+    const game = window.__game;
+    game.pause();
+    game.frame = () => {};
+    const player = { x: 132.5, y: 21.002, z: -100.5 };
+    game.body.position = { ...player };
+    game.previous = { ...player };
+    game.view.camera.position.set(player.x, player.y + 1.61, player.z);
+    game.view.camera.rotation.set(-.035, -Math.PI / 2, 0, 'YXZ');
+    for (const key of game.world.stream(player.x, player.z, 3)) game.view.remove(key);
+    for (let z = -3; z <= 3; z++) for (let x = -3; x <= 3; x++)
+      if (x * x + z * z <= 12.25) game.world.ensure(Math.floor(player.x / 16) + x, Math.floor(player.z / 16) + z, true);
+    game.lighting.rebuild();
+    for (let i = 0; i < 512 && game.world.dirty.size; i++) game.view.rebuild(game.world, 6);
+    game.entities.life.reactivate();
+    game.entities.life.prepare(game.entities.list, player, .25, false, game.entities.elapsed, game.entities.navigation);
+    game.entityView.update(game.entities, game.entities.elapsed, game.view.camera, game.view.graphicsProfile);
+    game.view.hand.visible = false;
+    game.ui.overlay.style.display = 'none';
+    for (let i = 0; i < 512 && game.view.distant && !game.view.distant.stats.ready; i++) game.view.updateDistant(game.world);
+    game.view.setGpuTimingEnabled(true);
+  });
+
+  for (const hour of [12, 23]) {
+    for (const quality of ['low', 'medium', 'high', 'low', 'high', 'medium']) {
+      const result = await page.evaluate(async ({ hour, quality }) => {
+        const game = window.__game, view = game.view;
+        const simulationBefore = {
+          entityCount: game.entities.list.length,
+          chunkCount: game.world.chunks.size,
+          editCount: game.world.edits.size,
+          navRevision: game.world.navRevision,
+          player: { ...game.body.position },
+        };
+        const versionsBefore = [...view.materials.map(material => material.version), view.sky.material.version, ...(view.distant ? [view.distant.material.version] : [])];
+        game.settings.graphicsQuality = quality;
+        game.applySettings();
+        view.setGpuTimingEnabled(true);
+        const time = (hour - 6) / 24;
+        view.atmosphere.reset(time, false, 3);
+        view.environment(time, false);
+        for (let i = 0; i < 1024 && view.distant && !view.distant.stats.ready; i++) view.updateDistant(game.world);
+        const qualityLevel = quality === 'high' ? 2 : quality === 'medium' ? 1 : 0;
+        const levels = {
+          terrain: view.materials.map(material => material.uniforms.qualityLevel?.value ?? null),
+          sky: view.sky.material.uniforms.qualityLevel?.value ?? null,
+          distant: view.distant?.material.uniforms.qualityLevel?.value ?? null,
+        };
+        const gpuSamples = [];
+        for (let frame = 0; frame < 96; frame++) {
+          view.render();
+          const sample = view.consumeGpuTiming();
+          if (sample && Number.isFinite(sample.timeMs)) gpuSamples.push(sample.timeMs);
+          await new Promise(resolve => requestAnimationFrame(resolve));
+        }
+        view.render();
+        const versionsAfter = [...view.materials.map(material => material.version), view.sky.material.version, ...(view.distant ? [view.distant.material.version] : [])];
+        const simulationAfter = {
+          entityCount: game.entities.list.length,
+          chunkCount: game.world.chunks.size,
+          editCount: game.world.edits.size,
+          navRevision: game.world.navRevision,
+          player: { ...game.body.position },
+        };
+        return {
+          quality, hour, qualityLevel, levels,
+          materialVersionsStable: JSON.stringify(versionsBefore) === JSON.stringify(versionsAfter),
+          simulationStable: JSON.stringify(simulationBefore) === JSON.stringify(simulationAfter),
+          gpuSamples,
+          gpuMedianMs: gpuSamples.length ? [...gpuSamples].sort((a, b) => a - b)[Math.floor((gpuSamples.length - 1) / 2)] : null,
+          gpuP95Ms: gpuSamples.length ? [...gpuSamples].sort((a, b) => a - b)[Math.floor((gpuSamples.length - 1) * .95)] : null,
+          gpuTimingAvailable: view.capabilities.timerQuery,
+          programs: view.renderer.info.programs?.length ?? null,
+          render: { ...view.worldRenderStats },
+          png: view.canvas.toDataURL('image/png'),
+        };
+      }, { hour, quality });
+      const png = result.png;
+      delete result.png;
+      assert.equal(result.materialVersionsStable, true, `${quality} ${hour}: shader material version changed during profile switch`);
+      assert.equal(result.simulationStable, true, `${quality} ${hour}: authoritative simulation changed during profile switch`);
+      assert.deepEqual(result.levels.terrain, [result.qualityLevel, result.qualityLevel, result.qualityLevel]);
+      assert.equal(result.levels.sky, result.qualityLevel);
+      if (result.levels.distant !== null) assert.equal(result.levels.distant, result.qualityLevel);
+      if (quality === 'low' || quality === 'medium' || quality === 'high') {
+        if (records.every(record => record.hour !== hour || record.quality !== quality))
+          await writeFile(`${output}/${hour}-${quality}.png`, Buffer.from(png.split(',')[1], 'base64'));
+      }
+      records.push(result);
+      console.log(`PROFILE ${hour} ${quality}: ${result.gpuSamples.length} async GPU samples`);
+    }
+  }
+  assert.deepEqual(errors, []);
+  const summary = [12, 23].map(hour => ['low', 'medium', 'high'].map(quality => {
+    const rows = records.filter(record => record.hour === hour && record.quality === quality);
+    const gpu = rows.flatMap(row => row.gpuSamples);
+    return { hour, quality, gpuSamples: gpu.length, gpuMedianMs: percentile(gpu, .5), gpuP95Ms: percentile(gpu, .95), programs: rows.at(-1)?.programs ?? null };
+  }));
+  verifyReleaseManifest();
+  await writeFile(`${output}/results.json`, JSON.stringify({
+    status: 'profile-switch-and-render-smoke-tested', source, summary, records, errors,
+    note: 'Matched paused scene and camera; repeated Low/Medium/High switches; asserts authoritative entity/chunk/edit/navigation/player snapshots remain unchanged and material versions do not change. GPU samples use non-blocking EXT_disjoint_timer_query_webgl2 when available. If unavailable, GPU timing is null; no CPU wall-time is presented as GPU time. SwiftShader results are software-renderer diagnostics, not physical GPU performance guarantees.',
+  }, null, 2));
+  console.log(JSON.stringify(summary));
+} catch (error) {
+  await writeFile(`${output}/failure.json`, JSON.stringify({ source, error: String(error), records, errors }, null, 2));
+  throw error;
+} finally {
+  await browser?.close();
+  server.kill();
+}

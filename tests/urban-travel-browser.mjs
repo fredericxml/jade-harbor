@@ -19,14 +19,14 @@ async function sample(inspect=false) {
         return n<64&&screen.z>-1&&screen.z<1&&Math.abs(screen.x)<1&&Math.abs(screen.y)<1&&!raycast((x,y,z)=>{const v=g.world.get(x,y,z);return block(v).opaque?v:0;},eye,delta.normalize(),Math.max(0,n-.3));
       }).length;
     }
-    return { position: { ...g.body.position }, district: g.world.inspectDistrict(g.body.position.x, g.body.position.z)?.district?.id, flying: g.body.flying, grounded: g.body.grounded, generator: g.world.generatorVersion,
+    return { position: { ...g.body.position }, district: g.world.inspectDistrict(g.body.position.x, g.body.position.z)?.district?.id, flying: g.body.flying, grounded: g.body.grounded, 
       visible,
       active: g.entities.life.metrics.active, residents: g.entities.list.filter(e => e.kind === "villager").length, unique: new Set(g.entities.list.map(e => e.id)).size, total: g.entities.list.length,
       chunks: g.world.chunks.size, pending: g.world.pending.size, mesh: g.world.dirty.size, nav: g.entities.navigation.agents.size, nodes: g.entities.navigation.expandedLastTick,
       geometries: g.view.renderer.info.memory.geometries, triangles: g.view.worldRenderStats.triangles, draws: g.view.worldRenderStats.calls, frame: g.view.metrics.summary("frame"), tick: g.view.metrics.summary("tick") };
   },inspect);
 }
-function bounded(r) { assert.equal(r.generator, 10); assert.equal(r.residents, 4080); assert.equal(r.unique, r.total); assert(r.active <= 96); assert(r.nav <= 102); assert(r.nodes <= 96); assert(r.pending <= 8); assert(r.chunks <= 256); }
+function bounded(r) { assert.equal(r.residents, 4080); assert.equal(r.unique, r.total); assert(r.active <= 96); assert(r.nav <= 102); assert(r.nodes <= 96); assert(r.pending <= 8); assert(r.chunks <= 256); }
 async function steerTo(target, flying, rows, deadlineMs = 180000) {
   const started = Date.now(); let nextSample = 0;
   while (Date.now() - started < deadlineMs) {

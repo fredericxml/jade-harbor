@@ -13,10 +13,8 @@ try {
   await page.addInitScript(()=>localStorage.setItem("jade-harbor-settings",JSON.stringify({distance:3})));
   await mkdir(output,{recursive:true});await page.goto("http://127.0.0.1:4180");
   await page.locator('[data-action="new"]').click();await page.locator("#world-name").fill("Landmark program QA");await page.locator('[data-action="create"]').click();
-  await page.waitForFunction(()=>window.__game?.active);assert.equal(await page.evaluate(()=>window.__game.snapshot().generator),8);
+  await page.waitForFunction(()=>window.__game?.active);assert(await page.evaluate(()=>window.__game.world.landmarkPlan.sites.length===8));
   assert(await page.evaluate(()=>window.__game.save()));checks.push("real UI creates and checkpoints v8");
-  await page.evaluate(async()=>{const {freshWorld}=await import("/src/persistence/saves.ts");const fixture=freshWorld("Frozen v6 landmark QA","jade-harbor","creative");fixture.generator=6;await window.__game.start(fixture);if(!(await window.__game.save()))throw Error("v6 fixture checkpoint failed");});
-  checks.push("explicit v6 fixture preserves the frozen landmark reconstruction");
   await page.addStyleTag({content:"#hud,#toast,.toast { display:none!important; }"});
   const context=await page.evaluate(()=>{const p=window.__game.world.landmarkPlan;return {first:p.wallWalk[0],middle:p.wallWalk[Math.floor(p.wallWalk.length/2)],temple:p.sites.find(s=>s.id==="mountain-temple").level,view:p.sites.find(s=>s.id==="western-viewpoint").level};});
   const f=context.first,m=context.middle,t=context.temple,v=context.view;
@@ -65,7 +63,7 @@ try {
       if (!g.view.groups.get(`${Math.floor(target[0]/16)},${Math.floor(target[2]/16)}`)?.children.length || g.world.pending.size || g.world.dirty.size || g.lighting.pending) return false;
       // Sample queues and rendering in the SAME settled frame. A later screenshot
       // can overlap the game's normal periodic relighting; that is not a leak.
-      return { position: { ...g.body.position }, generator: g.world.generatorVersion,
+      return { position: { ...g.body.position }, 
         terrain: g.world.inspectTerrain(g.body.position.x, g.body.position.z), fps: g.fps, chunks: g.world.chunks.size,
         generationQueue: g.world.pending.size, meshQueue: g.world.dirty.size, triangles: g.view.renderer.info.render.triangles,
         drawCalls: g.view.renderer.info.render.calls, metrics: g.view.metrics.snapshot(), blockBytes: [...g.world.chunks.values()].reduce((n, c) => n + c.blocks.byteLength, 0) };
@@ -100,20 +98,12 @@ try {
     const id=g.meta.id;if(!(await g.save()))throw Error("pending-generation save failed");return {id,edits};
   });
   await page.reload();await page.locator(`[data-action="load"][data-id="${saved.id}"]`).click();await page.waitForFunction(()=>window.__game.active);
-  assert(await page.evaluate(({edits})=>{const g=window.__game;if(g.world.generatorVersion!==6||g.snapshot().generator!==6)return false;
+  assert(await page.evaluate(({edits})=>{const g=window.__game;
     return edits.every(([x,y,z,value])=>{g.world.ensure(Math.floor(x/16),Math.floor(z/16),true);return g.world.get(x,y,z)===value;});},saved));
-  checks.push("burst landmark travel, pending-generation edits, IndexedDB save and browser reload preserve v6 and every overlay");
-  for(const version of [3,4,5]){
-    const id=await page.evaluate(async version=>{const g=window.__game,{freshWorld}=await import("/src/persistence/saves.ts");
-      const old=freshWorld(`Legacy v${version}`,"jade-harbor","creative");old.generator=version;old.edits={"0,35,-45":9};await g.start(old);
-      if(g.snapshot().generator!==version||!(await g.save()))throw Error("legacy generator save failed");return g.meta.id;},version);
-    await page.reload();await page.locator(`[data-action="load"][data-id="${id}"]`).click();await page.waitForFunction(()=>window.__game.active);
-    assert(await page.evaluate(version=>{const g=window.__game;g.world.ensure(0,-3,true);return g.world.generatorVersion===version&&g.snapshot().generator===version&&g.world.get(0,35,-45)===9;},version));
-    checks.push(`v${version} imported overlay and generator survive real Game save/reload`);
-  }
+  checks.push("burst landmark travel, pending-generation edits, IndexedDB save and browser reload preserve every overlay");
   assert.deepEqual(errors,[]);
   await writeFile(`${output}/results.json`,JSON.stringify({status:"passed",recordedAt:new Date().toISOString(),checks,views,errors,
-    fixtureNote:"Actual generated v6 terrain; spectator cameras/daylight/view distance are fixtures. No geometry injection. Queue metrics are sampled atomically before screenshots. SwiftShader point samples are not physical-GPU FPS guarantees. Temporary images are intentionally excluded from the landmark design download."},null,2));
+    fixtureNote:"Actual current generated terrain; spectator cameras/daylight/view distance are fixtures. No geometry injection. Queue metrics are sampled atomically before screenshots. SwiftShader point samples are not physical-GPU FPS guarantees. Temporary images are intentionally excluded from the published release archive."},null,2));
   console.log("PASS",checks.join("; "));
 } catch(error){
   if(page&&!page.isClosed())await writeFile(`${output}/failure.json`,JSON.stringify({message:String(error),views,errors,state:await page.evaluate(()=>{const g=window.__game;return {position:g?.body.position,chunks:g?.world.chunks.size,generation:g?.world.pending.size,mesh:g?.world.dirty.size,lighting:g?.lighting.pending};})},null,2));

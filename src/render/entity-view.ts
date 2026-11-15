@@ -6,7 +6,26 @@ import type { TaskChain } from "../game/city-life/purpose";
 import type { ResidentState } from "../game/city-life/runtime";
 import { identityHash } from "../game/city-life/schedules";
 import { GRAPHICS_PROFILES, type GraphicsProfile } from "./graphics";
+import type { RenderWorkloadAudit } from "./render-audit";
 type Part=(color:string,x:number,y:number,z:number,w:number,h:number,d:number,rx?:number,ry?:number)=>void;
+type ResidentPoseCache = { signature: number; appearanceSignature: number; start: number; parts: number };
+type ResidentRenderInfo = { detail: number; animationTime: number; task?: TaskChain; state?: ResidentState; signature: number; appearanceSignature: number };
+
+const renderHashBuffer = new ArrayBuffer(4);
+const renderHashFloat = new Float32Array(renderHashBuffer);
+const renderHashUint = new Uint32Array(renderHashBuffer);
+function hashNumber(hash: number, value: number) {
+  renderHashFloat[0] = Number.isFinite(value) ? value : 0;
+  return Math.imul(hash ^ renderHashUint[0], 16777619) >>> 0;
+}
+function hashString(hash: number, value: string | undefined) {
+  if (value === undefined) return Math.imul(hash ^ 0xff, 16777619) >>> 0;
+  for (let i = 0; i < value.length; i++) hash = Math.imul(hash ^ value.charCodeAt(i), 16777619) >>> 0;
+  return Math.imul(hash ^ 0xfe, 16777619) >>> 0;
+}
+function hashBoolean(hash: number, value: boolean) {
+  return Math.imul(hash ^ (value ? 1 : 0), 16777619) >>> 0;
+}
 export class EntityView {
   models = new Map<string, THREE.Group>();
   drops = new Map<string, THREE.Mesh>();
@@ -21,15 +40,21 @@ export class EntityView {
   private colors = new Map<string, THREE.Color>();
   private actorScale=new THREE.Vector3();
   readonly stats={simulated:0,full:0,mid:0,far:0,culled:0,parts:0};
+  private disposed=false;
   private readonly visibleResidents:Entity[]=[];
   private readonly visibleOthers:Entity[]=[];
   private readonly alive=new Set<string>();
   private readonly dropIds=new Set<string>();
+  private readonly residentPoseCache = new Map<string, ResidentPoseCache>();
+  private readonly residentOrder: string[] = [];
+  private readonly residentInfo: ResidentRenderInfo[] = [];
+  private readonly residentDirtyRanges: Array<{ start: number; count: number; colors: boolean }> = [];
   private readonly frustum=new THREE.Frustum();
   private readonly cameraMatrix=new THREE.Matrix4();
   private readonly actorSphere=new THREE.Sphere(new THREE.Vector3(),2.2);
   private readonly phases=new Map<string,number>();
-  constructor(public scene: THREE.Scene) {
+  constructor(public scene: THREE.Scene, private readonly renderAudit?: RenderWorkloadAudit) {
+    this.renderAudit?.tag(this.civilians, "npc");
     this.civilians.count = 0; this.civilians.frustumCulled = false;
     this.civilians.instanceMatrix.setUsage(THREE.DynamicDrawUsage); scene.add(this.civilians);
   }
@@ -49,6 +74,7 @@ export class EntityView {
     d: number,
   ) {
     const m = new THREE.Mesh(this.geometry, this.material(color));
+    this.renderAudit?.tag(m, "npc");
     m.position.set(x, y, z);
     m.scale.set(w, h, d);
     group.add(m);
@@ -148,56 +174,210 @@ export class EntityView {
     if(task.prop==="broom"){part("#a08a58",.37,.72,.22,.045,1.25,.045,action==="sweep"?-.3+Math.sin(t*3+phase)*.15:-.15);part("#ae9863",.37,.13,.29,.25,.2,.11);}
     if(task.prop==="staff"){part("#846d4d",.4,.9,.16,.05,1.8,.05);part("#b7c5b8",.4,1.88,.16,.1,.22,.055);}
   }
-  private civilianBatch(actors: Entity[], t: number,entities:Entities,camera:THREE.Camera|undefined,profile:GraphicsProfile) {
-    let index = 0;
-    const part = (color: string, x: number, y: number, z: number, w: number, h: number, d: number, rx = 0, ry = 0) => {
-      if (index >= this.civilians.instanceMatrix.count) return;
-      this.pose.position.set(x, y, z); this.pose.scale.set(w, h, d); this.pose.rotation.set(rx, ry, 0); this.pose.updateMatrix();
-      this.partMatrix.multiplyMatrices(this.bodyMatrix, this.pose.matrix); this.civilians.setMatrixAt(index, this.partMatrix);
-      let c = this.colors.get(color); if (!c) { c = new THREE.Color(color); this.colors.set(color, c); }
-      this.civilians.setColorAt(index++, c);
-    };
-    for (const e of actors) {
-      const dx=e.body.position.x-(camera?.position.x??e.body.position.x),dy=e.body.position.y-(camera?.position.y??e.body.position.y),dz=e.body.position.z-(camera?.position.z??e.body.position.z),distance=dx*dx+dy*dy+dz*dz;
-      const detail=distance>profile.residentMidDistance**2?2:distance>profile.residentFullDistance**2?1:0;
-      if(detail===0)this.stats.full++;else if(detail===1)this.stats.mid++;else this.stats.far++;
-      const animationTime=detail>0?Math.floor(t*profile.farAnimationHz)/profile.farAnimationHz:t;
-      const p = e.body.position, robe = e.profession ? PROFESSIONS[e.profession].color : "#9b905b";
-      const walking = Math.hypot(e.body.velocity.x, e.body.velocity.z) > .2, swing = walking ? Math.sin(t * 7) * .35 : 0;
-      const working = !walking && ["working", "browsing", "gathering", "guarding", "sightseeing"].includes(e.state);
-      const carrying = e.profession === "dock_worker", book = e.profession === "scholar" || e.profession === "researcher";
-      const workArm = working && ["potter", "carpenter", "blacksmith", "merchant", "chef"].includes(e.profession ?? "") ? -.3 + Math.sin(t * 2.2 + p.x) * .18 : 0;
-      this.bodyMatrix.makeRotationY(e.yaw); this.bodyMatrix.setPosition(p.x, p.y, p.z);
-      const task=entities.life?.plan?.byId.get(e.id)?.task;
-      if(task){this.purposefulPerson(e,animationTime,task,entities.life?.states.get(e.id),part,detail);continue;}
-      part(robe, 0, .86, 0, .55, .68, .32);
-      part("#c8aa7e", 0, 1.43, 0, .46, .46, .44, 0, working ? Math.sin(t * .7 + p.z) * .09 : 0);
-      part("#3e4539", 0, 1.68, 0, .51, .12, .49);
-      if(detail===0)for (const x of [-.12, .12]) part("#2b3e35", x, 1.46, .225, .045, .05, .025);
-      if(detail<2)part("#ceae6b", 0, .64, .17, .56, .06, .03);
-      part(robe, -.36, .85, 0, .16, .6, .2, carrying || book ? -.8 : swing + workArm);
-      part(robe, .36, .85, 0, .16, .6, .2, carrying || book ? -.8 : -swing + workArm);
-      part("#475549", -.16, .28, 0, .2, .56, .23, -swing);
-      part("#475549", .16, .28, 0, .2, .56, .23, swing);
-      if (carrying) { part("#92704b", 0, .85, .4, .49, .43, .4); part("#c7a472", 0, .85, .61, .49, .055, .025); }
-      if (book) { part("#465e58", 0, .99, .35, .43, .29, .065, -.25); part("#ded3ad", 0, 1.015, .39, .36, .21, .02, -.25); }
-      if (e.profession === "fisherman") part("#b29669", .38, 1.15, .25, .045, 1.55, .045, -.25);
-      if (e.profession === "guard") { part("#846d4d", .4, .9, .16, .05, 1.8, .05); part("#b7c5b8", .4, 1.88, .16, .1, .22, .055); }
-      if (working && ["carpenter", "blacksmith"].includes(e.profession ?? "")) part("#73827c", .35, .93 + Math.sin(t * 2.2) * .08, .25, .19, .12, .12);
+  private appearanceSignature(e: Entity, task: TaskChain | undefined, detail: number) {
+    let hash = 2166136261;
+    hash = hashString(hash, e.profession);
+    hash = hashNumber(hash, detail);
+    hash = hashString(hash, task?.prop);
+    const look = task?.look;
+    if (look) {
+      hash = hashString(hash, look.fingerprint);
+      hash = hashString(hash, look.upper);
+      hash = hashString(hash, look.lower);
+      hash = hashString(hash, look.sash);
+      hash = hashString(hash, look.hair);
+      hash = hashString(hash, look.skin);
+      hash = hashString(hash, look.hat);
+      hash = hashString(hash, look.hatColor);
+      hash = hashNumber(hash, look.width);
+      hash = hashNumber(hash, look.height);
+      hash = hashBoolean(hash, look.apron);
     }
-    this.stats.parts=index;
-    this.civilians.count = index; this.civilians.visible = index > 0;
-    if(index){this.civilians.instanceMatrix.clearUpdateRanges();this.civilians.instanceMatrix.addUpdateRange(0,index*16);this.civilians.instanceMatrix.needsUpdate=true;
-    if(this.civilians.instanceColor){this.civilians.instanceColor.clearUpdateRanges();this.civilians.instanceColor.addUpdateRange(0,index*3);this.civilians.instanceColor.needsUpdate=true;}}
+    return hash >>> 0;
+  }
+  private poseSignature(e: Entity, info: ResidentRenderInfo) {
+    const p = e.body.position, velocity = e.body.velocity;
+    let hash = 2166136261;
+    hash = hashString(hash, e.id);
+    hash = hashNumber(hash, p.x); hash = hashNumber(hash, p.y); hash = hashNumber(hash, p.z);
+    hash = hashNumber(hash, e.yaw);
+    hash = hashNumber(hash, velocity.x); hash = hashNumber(hash, velocity.z);
+    hash = hashNumber(hash, info.detail);
+    hash = Math.imul(hash ^ info.appearanceSignature, 16777619) >>> 0;
+    hash = hashString(hash, e.state);
+    const action = info.state?.taskActing ? info.state.taskAction : undefined;
+    hash = hashBoolean(hash, !!info.state?.taskActing);
+    hash = hashString(hash, action);
+    const walking = Math.hypot(velocity.x, velocity.z) > .2;
+    const working = !walking && ["working", "browsing", "gathering", "guarding", "sightseeing"].includes(e.state);
+    const animatedTaskAction = ["greet", "hammer", "sweep", "converse", "watch", "serve", "arrange", "shape", "restock"].includes(action ?? "");
+    if (walking || (info.task ? animatedTaskAction : working))
+      hash = hashNumber(hash, info.animationTime);
+    return hash >>> 0;
+  }
+  private prepareResident(e: Entity, index: number, t: number, entities: Entities, camera: THREE.Camera | undefined, profile: GraphicsProfile) {
+    let info = this.residentInfo[index];
+    if (!info) this.residentInfo[index] = info = { detail: 0, animationTime: t, signature: 0, appearanceSignature: 0 };
+    const dx = e.body.position.x - (camera?.position.x ?? e.body.position.x);
+    const dy = e.body.position.y - (camera?.position.y ?? e.body.position.y);
+    const dz = e.body.position.z - (camera?.position.z ?? e.body.position.z);
+    const distance = dx * dx + dy * dy + dz * dz;
+    info.detail = distance > profile.residentMidDistance ** 2 ? 2 : distance > profile.residentFullDistance ** 2 ? 1 : 0;
+    if (info.detail === 0) this.stats.full++;
+    else if (info.detail === 1) this.stats.mid++;
+    else this.stats.far++;
+    info.animationTime = info.detail > 0 ? Math.floor(t * profile.farAnimationHz) / profile.farAnimationHz : t;
+    info.task = entities.life?.plan?.byId.get(e.id)?.task;
+    info.state = entities.life?.states.get(e.id);
+    info.appearanceSignature = this.appearanceSignature(e, info.task, info.detail);
+    info.signature = this.poseSignature(e, info);
+    return info;
+  }
+  private writeCivilianActor(e: Entity, info: ResidentRenderInfo, base: number, limit: number, writeColors: boolean) {
+    let local = 0;
+    const part = (color: string, x: number, y: number, z: number, w: number, h: number, d: number, rx = 0, ry = 0) => {
+      const slot = base + local++;
+      if (local > limit || slot >= this.civilians.instanceMatrix.count) return;
+      this.pose.position.set(x, y, z);
+      this.pose.scale.set(w, h, d);
+      this.pose.rotation.set(rx, ry, 0);
+      this.pose.updateMatrix();
+      this.partMatrix.multiplyMatrices(this.bodyMatrix, this.pose.matrix);
+      this.civilians.setMatrixAt(slot, this.partMatrix);
+      if (writeColors) {
+        let c = this.colors.get(color);
+        if (!c) { c = new THREE.Color(color); this.colors.set(color, c); }
+        this.civilians.setColorAt(slot, c);
+      }
+    };
+    const p = e.body.position, walking = Math.hypot(e.body.velocity.x, e.body.velocity.z) > .2;
+    const swing = walking ? Math.sin(info.animationTime * 7) * .35 : 0;
+    this.bodyMatrix.makeRotationY(e.yaw);
+    this.bodyMatrix.setPosition(p.x, p.y, p.z);
+    if (info.task) {
+      this.purposefulPerson(e, info.animationTime, info.task, info.state, part, info.detail);
+      return local;
+    }
+    const robe = e.profession ? PROFESSIONS[e.profession].color : "#9b905b";
+    const working = !walking && ["working", "browsing", "gathering", "guarding", "sightseeing"].includes(e.state);
+    const carrying = e.profession === "dock_worker", book = e.profession === "scholar" || e.profession === "researcher";
+    const workArm = working && ["potter", "carpenter", "blacksmith", "merchant", "chef"].includes(e.profession ?? "") ? -.3 + Math.sin(info.animationTime * 2.2 + p.x) * .18 : 0;
+    part(robe, 0, .86, 0, .55, .68, .32);
+    part("#c8aa7e", 0, 1.43, 0, .46, .46, .44, 0, working ? Math.sin(info.animationTime * .7 + p.z) * .09 : 0);
+    part("#3e4539", 0, 1.68, 0, .51, .12, .49);
+    if (info.detail === 0) for (const x of [-.12, .12]) part("#2b3e35", x, 1.46, .225, .045, .05, .025);
+    if (info.detail < 2) part("#ceae6b", 0, .64, .17, .56, .06, .03);
+    part(robe, -.36, .85, 0, .16, .6, .2, carrying || book ? -.8 : swing + workArm);
+    part(robe, .36, .85, 0, .16, .6, .2, carrying || book ? -.8 : -swing + workArm);
+    part("#475549", -.16, .28, 0, .2, .56, .23, -swing);
+    part("#475549", .16, .28, 0, .2, .56, .23, swing);
+    if (carrying) { part("#92704b", 0, .85, .4, .49, .43, .4); part("#c7a472", 0, .85, .61, .49, .055, .025); }
+    if (book) { part("#465e58", 0, .99, .35, .43, .29, .065, -.25); part("#ded3ad", 0, 1.015, .39, .36, .21, .02, -.25); }
+    if (e.profession === "fisherman") part("#b29669", .38, 1.15, .25, .045, 1.55, .045, -.25);
+    if (e.profession === "guard") { part("#846d4d", .4, .9, .16, .05, 1.8, .05); part("#b7c5b8", .4, 1.88, .16, .1, .22, .055); }
+    if (working && ["carpenter", "blacksmith"].includes(e.profession ?? "")) part("#73827c", .35, .93 + Math.sin(info.animationTime * 2.2) * .08, .25, .19, .12, .12);
+    return local;
+  }
+  private uploadCivilianRanges(total: number, full: boolean) {
+    const matrix = this.civilians.instanceMatrix;
+    matrix.clearUpdateRanges();
+    if (total > 0) {
+      if (full) matrix.addUpdateRange(0, total * 16);
+      else {
+        for (const range of this.residentDirtyRanges) matrix.addUpdateRange(range.start * 16, range.count * 16);
+      }
+      matrix.needsUpdate = true;
+    }
+    const colors = this.civilians.instanceColor;
+    if (!colors) return;
+    colors.clearUpdateRanges();
+    let changed = false;
+    if (full) {
+      if (total > 0) { colors.addUpdateRange(0, total * 3); changed = true; }
+    } else {
+      for (const range of this.residentDirtyRanges) if (range.colors) {
+        colors.addUpdateRange(range.start * 3, range.count * 3);
+        changed = true;
+      }
+    }
+    if (changed) colors.needsUpdate = true;
+  }
+  private rebuildCivilianBatch(actors: Entity[], t: number, entities: Entities, camera: THREE.Camera | undefined, profile: GraphicsProfile) {
+    this.stats.full = this.stats.mid = this.stats.far = 0;
+    this.residentPoseCache.clear();
+    this.residentOrder.length = 0;
+    let total = 0;
+    const capacity = this.civilians.instanceMatrix.count;
+    for (let i = 0; i < actors.length; i++) {
+      const e = actors[i], info = this.prepareResident(e, i, t, entities, camera, profile);
+      const generated = this.writeCivilianActor(e, info, total, Infinity, true);
+      const parts = Math.min(generated, Math.max(0, capacity - total));
+      this.residentPoseCache.set(e.id, { signature: info.signature, appearanceSignature: info.appearanceSignature, start: total, parts });
+      this.residentOrder.push(e.id);
+      total += parts;
+    }
+    this.residentInfo.length = actors.length;
+    this.civilians.count = total;
+    this.civilians.visible = total > 0;
+    this.stats.parts = total;
+    this.uploadCivilianRanges(total, true);
+  }
+  private civilianBatch(actors: Entity[], t: number, entities: Entities, camera: THREE.Camera | undefined, profile: GraphicsProfile) {
+    let orderChanged = actors.length !== this.residentOrder.length;
+    if (!orderChanged) for (let i = 0; i < actors.length; i++) {
+      if (actors[i].id !== this.residentOrder[i] || !this.residentPoseCache.has(actors[i].id)) { orderChanged = true; break; }
+    }
+    if (orderChanged) {
+      this.rebuildCivilianBatch(actors, t, entities, camera, profile);
+      return;
+    }
+    this.stats.full = this.stats.mid = this.stats.far = 0;
+    this.residentDirtyRanges.length = 0;
+    let dirtyActors = 0, layoutChanged = false;
+    for (let i = 0; i < actors.length; i++) {
+      const e = actors[i], info = this.prepareResident(e, i, t, entities, camera, profile);
+      const cached = this.residentPoseCache.get(e.id)!;
+      if (info.signature === cached.signature) continue;
+      const writeColors = info.appearanceSignature !== cached.appearanceSignature;
+      const generated = this.writeCivilianActor(e, info, cached.start, cached.parts, writeColors);
+      const available = Math.max(0, this.civilians.instanceMatrix.count - cached.start);
+      if (Math.min(generated, available) !== cached.parts) { layoutChanged = true; break; }
+      cached.signature = info.signature;
+      cached.appearanceSignature = info.appearanceSignature;
+      if (cached.parts > 0) {
+        const previous = this.residentDirtyRanges[this.residentDirtyRanges.length - 1];
+        if (previous && previous.start + previous.count === cached.start && previous.colors === writeColors) previous.count += cached.parts;
+        else this.residentDirtyRanges.push({ start: cached.start, count: cached.parts, colors: writeColors });
+      }
+      dirtyActors++;
+    }
+    if (layoutChanged) {
+      this.rebuildCivilianBatch(actors, t, entities, camera, profile);
+      return;
+    }
+    this.residentInfo.length = actors.length;
+    if (dirtyActors > 0) {
+      const total = this.civilians.count;
+      const totalRanges = this.residentDirtyRanges.length;
+      if (dirtyActors > actors.length * .55 || totalRanges > 24) {
+        // A broad change is cheaper to upload as one contiguous matrix range.
+        // Do not upload the color buffer unless appearance data also changed.
+        const colorsDirty = this.residentDirtyRanges.some(range => range.colors);
+        this.residentDirtyRanges.length = 0;
+        if (total > 0) this.residentDirtyRanges.push({ start: 0, count: total, colors: colorsDirty });
+      }
+      this.uploadCivilianRanges(total, false);
+    }
+    this.stats.parts = this.civilians.count;
   }
   update(entities: Entities, t: number,camera?:THREE.Camera,profile:GraphicsProfile=GRAPHICS_PROFILES.high) {
+    if(this.disposed)return;
     const residents=this.visibleResidents,others=this.visibleOthers,alive=this.alive;residents.length=0;others.length=0;alive.clear();
     this.stats.simulated=entities.life?.active.size??0;this.stats.full=this.stats.mid=this.stats.far=this.stats.culled=0;
     if(camera){camera.updateMatrixWorld();this.cameraMatrix.multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse);this.frustum.setFromProjectionMatrix(this.cameraMatrix);}
-    for(const e of entities.list){
-      // Check the bounded active set before loaded-column key work. Rendering
-      // never writes that set, a resident or any task/navigation state.
-      if(e.kind==="villager"&&entities.life&&!entities.life.active.has(e.id))continue;
+    for(const e of entities.renderActors()){
+      // Entities supplies the bounded active resident set plus the small
+      // encounter set. The full persistent registry is not scanned per frame.
       const p=e.body.position;
       if(!entities.world.loaded(p.x,p.z)){if(e.kind==="villager")this.stats.culled++;continue;}
       if(camera){this.actorSphere.center.set(p.x,p.y+1.1,p.z);if(this.actorSphere.center.distanceToSquared(camera.position)>16&&!this.frustum.intersectsSphere(this.actorSphere)){if(e.kind==="villager")this.stats.culled++;continue;}}
@@ -207,6 +387,7 @@ export class EntityView {
     for (const [id, g] of this.models)
       if (!alive.has(id)) {
         this.scene.remove(g);
+        g.traverse(o=>{if(o instanceof THREE.Mesh)this.renderAudit?.untag(o);});
         this.models.delete(id);
       }
     for (const e of others) {
@@ -224,6 +405,7 @@ export class EntityView {
     for (const [id, m] of this.drops)
       if (!dropIds.has(id)) {
         this.scene.remove(m);
+        this.renderAudit?.untag(m);
         this.drops.delete(id);
       }
     for (const d of entities.drops) {
@@ -234,6 +416,7 @@ export class EntityView {
           this.material(item(d.stack.id)?.color ?? "#e1ce9d"),
         );
         m.scale.setScalar(0.2);
+        this.renderAudit?.tag(m, "drops");
         this.scene.add(m);
         this.drops.set(d.id, m);
       }
@@ -247,9 +430,21 @@ export class EntityView {
   }
   clear() {
     this.civilians.count = 0; this.civilians.visible = false;
-    for (const g of this.models.values()) this.scene.remove(g);
-    for (const m of this.drops.values()) this.scene.remove(m);
+    for (const g of this.models.values()) { this.scene.remove(g); g.traverse(o=>{if(o instanceof THREE.Mesh)this.renderAudit?.untag(o);}); }
+    for (const m of this.drops.values()) { this.scene.remove(m); this.renderAudit?.untag(m); }
     this.models.clear();
-    this.drops.clear();this.phases.clear();this.visibleResidents.length=this.visibleOthers.length=0;this.alive.clear();this.dropIds.clear();
+    this.drops.clear();this.phases.clear();this.visibleResidents.length=this.visibleOthers.length=0;this.alive.clear();this.dropIds.clear();this.residentPoseCache.clear();this.residentOrder.length=0;this.residentInfo.length=0;this.residentDirtyRanges.length=0;
   }
+  dispose(){
+    if(this.disposed)return;
+    this.disposed=true;
+    this.clear();
+    this.scene.remove(this.civilians);
+    this.renderAudit?.untag(this.civilians);
+    this.geometry.dispose();
+    this.civilianMaterial.dispose();
+    for(const material of this.materials.values())material.dispose();
+    this.materials.clear();this.colors.clear();
+  }
+
 }

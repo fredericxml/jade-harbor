@@ -1,13 +1,11 @@
 import { B } from "../blocks";
 import { hash } from "../noise";
 import { contains, intersects, type Rect, type Structure } from "../city/plan";
-import { VoxelWriter } from "../city/writer";
 import type { MacroPlan } from "../geography/plan";
 import type { LandmarkPlan } from "../geography/landmarks";
 import type { RealizationPlan } from "../landmarks/types";
 import { footprintsOverlap, type Footprint } from "../geography/geometry";
 import { sampleTerrain } from "../geography/terrain";
-import { drawUrbanLot } from "./architecture";
 import { districtSpec, FAMILY, type Archetype, type DistrictId, type RoofFamily } from "./districts";
 import { nearestRoadPoint, PANDA_PROTECTION, roadBounds, roadElevation, roadFootprint, type UrbanLot, type UrbanPlan, type UrbanRoad } from "./plan";
 
@@ -120,29 +118,4 @@ export function createDensityPlan(m: MacroPlan, reservations: LandmarkPlan, real
   diagnostics.added = infill.length; diagnostics.maxLocalLots = Math.max(0, ...[...byChunk.values()].map(a => a.length));
   const districts = base.districts.map(d => { const old = base.lots.filter(l => l.districtId === d.id), added = infill.filter(l => l.districtId === d.id); return { id: d.id, before: old.length, added: added.length, beforeArea: old.reduce((n, l) => n + areaSize(l), 0), addedArea: added.reduce((n, l) => n + areaSize(l), 0), frontage: added.reduce((n, l) => n + (l.facing % 2 ? l.z2 - l.z1 + 1 : l.x2 - l.x1 + 1), 0) }; });
   return { baseUrban: base, urban, infill, links, byChunk, linksByChunk, openSpaces: INTENTIONAL_OPEN_SPACES, diagnostics, districts };
-}
-
-/** Local additive realization after frozen v6. Supports, dry entrance links,
- * reusable district architecture; no neighboring generation or global scans. */
-export function drawDensity(w: VoxelWriter, m: MacroPlan, p: DensityPlan, cx: number, cz: number) {
-  for (const lot of p.byChunk.get(`${cx},${cz}`) ?? []) {
-    const e = lot.envelope;
-    w.fill(e.x1, lot.baseY + 1, e.z1, e.x2, lot.baseY + lot.floors * 5 + 12, e.z2, B.Air);
-    for (let z = Math.max(w.oz, e.z1); z <= Math.min(w.oz + 15, e.z2); z++) for (let x = Math.max(w.ox, e.x1); x <= Math.min(w.ox + 15, e.x2); x++) {
-      const t = sampleTerrain(m, x, z);
-      if (t.water) { if ((x - lot.x1) % 6 === 0 && (z - lot.z1) % 6 === 0) w.fill(x, t.height, z, x, lot.baseY - 1, z, B.DarkTimber); w.put(x, lot.baseY, z, B.Planks); }
-      else w.fill(x, Math.min(t.height, lot.baseY), z, x, lot.baseY, z, B.SculptureStone);
-    }
-    drawUrbanLot(w, lot);
-  }
-  for (const road of p.linksByChunk.get(`${cx},${cz}`) ?? []) {
-    const bounds = roadBounds(road);
-    for (let z = Math.max(w.oz, Math.floor(bounds.z1)); z <= Math.min(w.oz + 15, Math.ceil(bounds.z2)); z++) for (let x = Math.max(w.ox, Math.floor(bounds.x1)); x <= Math.min(w.ox + 15, Math.ceil(bounds.x2)); x++) {
-      const q = nearestRoadPoint(road, x, z); if (q.distance > road.half) continue;
-      const level = Math.round(q.y * 2) / 2, y = Math.floor(level), t = sampleTerrain(m, x, z);
-      w.fill(x, y + 1, z, x, y + 3, z, B.Air);
-      if (!t.water) w.fill(x, Math.min(t.height, y), z, x, y - 1, z, B.SculptureStone);
-      w.put(x, y, z, road.surface); if (level % 1) w.put(x, y + 1, z, B.Slab);
-    }
-  }
 }

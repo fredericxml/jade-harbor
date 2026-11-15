@@ -9,7 +9,7 @@ async function position(x,y,z,tx,ty,tz){await page.evaluate(p=>{const g=window._
 try{
   await new Promise((ok,fail)=>{server.stdout.on("data",b=>{if(b.toString().includes("Local:"))ok();});server.on("error",fail);});
   browser=await chromium.launch({headless:true,args:["--no-sandbox","--use-angle=swiftshader","--enable-unsafe-swiftshader","--disable-dev-shm-usage"]});page=await browser.newPage({viewport:{width:1280,height:900}});page.setDefaultTimeout(60000);page.on("pageerror",e=>errors.push(e.message));
-  await mkdir("test-results/upgrade",{recursive:true});await page.goto("http://127.0.0.1:4182");await page.getByRole("button",{name:"Create a world"}).click();await page.locator("#world-name").fill("Working courtyard");await page.getByRole("button",{name:"Enter your world"}).click();await page.waitForFunction(()=>window.__game.active);
+  await mkdir("test-results/upgrade",{recursive:true});await page.goto("http://127.0.0.1:4182");await page.locator('[data-action="new"]').click();await page.locator("#world-name").fill("Working courtyard");await page.locator('[data-action="create"]').click();await page.waitForFunction(()=>window.__game.active);
   // An explicit factory fixture isolates machine behavior; interaction and elapsed ticks are real.
   await page.evaluate(()=>{const g=window.__game;g.settings.distance=3;g.applySettings();g.entities.list=[];g.inventory.slots=Array(36).fill(null);g.inventory.slots[0]={id:168,count:1};g.inventory.slots[9]={id:103,count:2};
     for(let cx=0;cx<=1;cx++)g.world.ensure(cx,0,true);

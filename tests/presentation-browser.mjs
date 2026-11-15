@@ -4,7 +4,7 @@ import {spawn} from 'node:child_process';
 import {mkdir,writeFile,readFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import assert from 'node:assert/strict';
-const output=process.env.PRESENTATION_OUTPUT??'test-results/city-presentation',records=[],errors=[];
+const output=process.env.PRESENTATION_OUTPUT??'test-results/presentation',records=[],errors=[];
 const source=createHash('sha256').update(JSON.stringify(JSON.parse(await readFile('dist/release-integrity.json','utf8')).source)).digest('hex');
 const server=spawn(process.execPath,['node_modules/vite/bin/vite.js','--host','127.0.0.1','--port','4189','--strictPort'],{stdio:['ignore','pipe','pipe']});let browser,page;
 const fixtures=[

@@ -6,7 +6,7 @@ import { verifyReleaseManifest } from "../scripts/release-integrity.mjs";
 import assert from "node:assert/strict";
 
 const baseline = process.env.URBAN_BASELINE === "1";
-const observeOnly=baseline||process.env.URBAN_OBSERVE_ONLY==="1", expectedVersion=Number(process.env.URBAN_GENERATOR??(baseline?6:10));
+const observeOnly=baseline||process.env.URBAN_OBSERVE_ONLY==="1";
 const output = process.env.URBAN_OUTPUT ?? "test-results/urban-life";
 const seconds = Math.max(60, Math.min(90, Number(process.env.URBAN_SECONDS) || 60));
 const selected = process.env.URBAN_SCENES?.split(",");
@@ -22,7 +22,7 @@ const scenes = [], errors = [], activityFailures = [];
 // world. Continuous travel/persistent-world checks have their own harness.
 const resumed=process.env.URBAN_RESUME==="1";
 if(resumed) {
-  assert(sourceDigest&&!selected&&!observeOnly&&expectedVersion===10&&!process.env.URBAN_SECONDS,"Resume requires the full verified current matrix");
+  assert(sourceDigest&&!selected&&!observeOnly&&!process.env.URBAN_SECONDS,"Resume requires the full verified current matrix");
   const previous=JSON.parse(await readFile(`${output}/progress.json`,"utf8"));
   assert.equal(previous.verifiedSource,verifiedSource,"Cannot reuse observations from another application build");
   assert.equal(previous.harness,harness,"Cannot reuse observations from another QA fixture revision");assert.equal(new Set(previous.scenes.map(s=>s.fixture.name)).size,previous.scenes.length);assert.deepEqual(previous.errors,[]);assert.deepEqual(previous.activityFailures,[]);
@@ -44,8 +44,6 @@ try {
   await page.locator("#world-name").fill(baseline ? "Urban correction baseline" : "Urban correction acceptance");
   await page.locator('[data-action="create"]').click();
   await page.waitForFunction(() => window.__game?.active);
-  if(expectedVersion!==10)await page.evaluate(async version=>{const {freshWorld}=await import("/src/persistence/saves.ts"),s=freshWorld("Explicit observation fixture","jade-harbor","creative");s.generator=version;await window.__game.start(s);},expectedVersion);
-  assert.equal(await page.evaluate(() => window.__game.world.generatorVersion), expectedVersion);
   await page.evaluate(() => {
     const g = window.__game, renderer = g.view.renderer, render = renderer.render.bind(renderer);
     renderer.render = (scene, camera) => { render(scene, camera); if (scene === g.view.scene) g.urbanRenderStats = { triangles: renderer.info.render.triangles, draws: renderer.info.render.calls }; };
@@ -97,9 +95,9 @@ try {
   for (const f of fixtures.filter(f => (!selected || selected.includes(f.name))&&!scenes.some(s=>s.fixture.name===f.name))) {
     const duration = !process.env.URBAN_SECONDS && f.district === "scholar" ? 90 : seconds;
     if (f.reloadBefore) {
-      const saved = await page.evaluate(async () => { const g=window.__game;if(!(await g.save()))throw Error("acceptance save failed");return {id:g.meta.id,version:g.world.generatorVersion,ids:g.entities.list.filter(e=>e.kind==="villager").map(e=>e.id).sort()}; });
+      const saved = await page.evaluate(async () => { const g=window.__game;if(!(await g.save()))throw Error("acceptance save failed");return {id:g.meta.id,ids:g.entities.list.filter(e=>e.kind==="villager").map(e=>e.id).sort()}; });
       await page.reload(); await page.locator(`[data-action="load"][data-id="${saved.id}"]`).click(); await page.waitForFunction(()=>window.__game.active);
-      assert(await page.evaluate(s=>{const g=window.__game;return g.world.generatorVersion===s.version&&JSON.stringify(g.entities.list.filter(e=>e.kind==="villager").map(e=>e.id).sort())===JSON.stringify(s.ids);},saved));
+      assert(await page.evaluate(s=>{const g=window.__game;return JSON.stringify(g.entities.list.filter(e=>e.kind==="villager").map(e=>e.id).sort())===JSON.stringify(s.ids);},saved));
       await page.evaluate(() => {const g=window.__game,r=g.view.renderer,render=r.render.bind(r);r.render=(scene,camera)=>{render(scene,camera);if(scene===g.view.scene)g.urbanRenderStats={triangles:r.info.render.triangles,draws:r.info.render.calls};};});
       console.log("RELOADED", saved.id, saved.ids.length, "identities preserved");
     }

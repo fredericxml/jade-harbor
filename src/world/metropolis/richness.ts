@@ -58,7 +58,7 @@ export function richDesign(lot:UrbanLot,base:BuildingDesign,seed:number,attempt=
     footprint:buildingVolumes(lot,base),seed:Math.floor(hash(lot.x1,lot.z1,seed,10123)*0x7fffffff)};
 }
 
-/** Keep the complete v9 ground-body union. Subdivision changes upper heights
+/** Keep the complete existing ground-body union. Subdivision changes upper heights
  * inside it, never lot occupancy, entrances, roads, reserves or map bounds. */
 export function planRichBuilding(lot:UrbanLot,d:RichDesign):RichAssembly {
   const width=lot.facing%2?lot.z2-lot.z1+1:lot.x2-lot.x1+1,depth=lot.facing%2?lot.x2-lot.x1+1:lot.z2-lot.z1+1;
@@ -74,7 +74,7 @@ export function planRichBuilding(lot:UrbanLot,d:RichDesign):RichAssembly {
     else if(i===major&&["rear-rise","pavilion-wing","gate-house"].includes(d.composition)&&a.d>=7){const z=Math.max(3,Math.floor(a.d*.58));push(a.u,a.v,a.w,z,d.composition==="gate-house"?f:low);push(a.u,a.v+z,a.w,a.d-z,d.composition==="gate-house"?low:f);}
     else volumes.push({...a,floors:f});
   }
-  for(const a of volumes)if(a.w<3||a.d<2||a.u<0||a.v<0||a.u+a.w>width||a.v+a.d>depth||!Number.isInteger(a.floors))throw Error(`Invalid v10 body: ${lot.id}`);
+  for(const a of volumes)if(a.w<3||a.d<2||a.u<0||a.v<0||a.u+a.w>width||a.v+a.d>depth||!Number.isInteger(a.floors))throw Error(`Invalid building body: ${lot.id}`);
   const roofs:RichRoof[]=[];
   for(const a of volumes) {
     // A broad compound gets supported roof bays rather than one enormous

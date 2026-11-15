@@ -46,6 +46,27 @@ export class BlockColumn {
   get byteLength() { let n=0;for(const s of this.sections.values()) n+=s.byteLength;return n; }
   serialize():SectionData[] { return [...this.sections].map(([sy,s])=>typeof s.values==='number'?{sy,uniform:s.values}:{sy,data:s.values}); }
   static from(rows:SectionData[]) {
-    const c=new BlockColumn(); for(const r of rows) c.sections.set(r.sy,new BlockSection(r.data ?? r.uniform ?? 0)); return c;
+    if (!Array.isArray(rows) || rows.length > MAX_SECTION - MIN_SECTION + 1)
+      throw new Error("Invalid generated chunk sections.");
+    const c = new BlockColumn(), seen = new Set<number>();
+    for (const row of rows) {
+      if (!row || typeof row !== "object" || Array.isArray(row))
+        throw new Error("Invalid generated chunk section.");
+      const { sy, uniform, data } = row;
+      const hasUniform = uniform !== undefined, hasData = data !== undefined;
+      if (!Number.isInteger(sy) || sy < MIN_SECTION || sy > MAX_SECTION || seen.has(sy) || hasUniform === hasData)
+        throw new Error("Invalid generated chunk section.");
+      if (hasData) {
+        if (!(data instanceof Uint16Array) || data.length !== 4096)
+          throw new Error("Invalid generated chunk section.");
+        c.sections.set(sy, new BlockSection(data));
+      } else {
+        if (typeof uniform !== "number" || !Number.isInteger(uniform) || uniform < 0 || uniform > 65535)
+          throw new Error("Invalid generated chunk section.");
+        c.sections.set(sy, new BlockSection(uniform));
+      }
+      seen.add(sy);
+    }
+    return c;
   }
 }

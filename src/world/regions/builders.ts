@@ -5,6 +5,11 @@ import { footprintBounds } from "../geography/geometry";
 import type { MacroPlan } from "../geography/plan";
 import { regionalRouteAt, type RegionalPlan, type RegionalSite } from "./plan";
 
+import {richDesign,planRichBuilding,drawRichLot} from "../metropolis/richness";
+import {districtSpec,type DistrictId} from "../metropolis/districts";
+import type {UrbanLot} from "../metropolis/plan";
+import type {BuildingDesign} from "../metropolis/variety";
+
 const clipped=(w:VoxelWriter,r:{x1:number;x2:number;z1:number;z2:number},fn:(x:number,z:number)=>void)=>{
   for(let z=Math.max(w.oz,Math.ceil(r.z1));z<=Math.min(w.oz+15,Math.floor(r.z2));z++)for(let x=Math.max(w.ox,Math.ceil(r.x1));x<=Math.min(w.ox+15,Math.floor(r.x2));x++)fn(x,z);
 };
@@ -13,26 +18,16 @@ function foundation(w:VoxelWriter,m:MacroPlan,x:number,z:number,y:number,surface
   w.fill(x,Math.min(h,y)-2,z,x,y,z,B.SculptureStone);w.put(x,y,z,surface);
   if(clear)w.fill(x,y+1,z,x,Math.max(h+5,y+clear),z,B.Air);
 }
+/** Regional support buildings use the same building grammar inside their established
+ * pads. Landmark monuments, public ribbons and landscape planting stay unchanged. */
 function buildings(w:VoxelWriter,m:MacroPlan,s:RegionalSite) {
   for(const b of s.buildings) {
-    const r=b.bounds,y=b.level,top=y+b.floors*5,door=Math.round((r.x1+r.x2)/2);
-    clipped(w,r,(x,z)=>{
-      foundation(w,m,x,z,y,B.Planks,top-y+8);
-      for(let f=0;f<b.floors;f++){
-        const level=y+f*5;if(f)w.put(x,level,z,B.Planks);
-        const edge=x===r.x1||x===r.x2||z===r.z1||z===r.z2;
-        if(!edge)continue;
-        const column=(x===r.x1||x===r.x2)&&(z===r.z1||z===r.z2)||((z===r.z1||z===r.z2)&&(x-r.x1)%4===0);
-        if(!b.open||column)w.fill(x,level+1,z,x,level+4,z,column?B.DarkTimber:b.wall);
-        if(!b.open&&!column&&((z===r.z1||z===r.z2)&&(x-r.x1)%4<3||(x===r.x1||x===r.x2)&&(z-r.z1)%4<2))w.fill(x,level+2,z,x,level+3,z,B.Paper);
-        if((z===r.z1||z===r.z2)&&f===0&&Math.abs(x-door)<=1)w.fill(x,y+1,z,x,y+3,z,B.Air);
-        w.put(x,level+4,z,B.DarkTimber);
-      }
-    });
-    // One-block eaves sit directly on a complete perimeter beam.
-    for(let k=0;k<4;k++)w.fill(r.x1-1+k,top+k,r.z1-1+k,r.x2+1-k,top+k,r.z2+1-k,b.roof);
-    w.fill(r.x1+3,top+4,Math.round((r.z1+r.z2)/2),r.x2-3,top+4,Math.round((r.z1+r.z2)/2),B.DarkTimber);
-    w.put(door-3,y+3,r.z2+1,B.TeaSign);w.put(door+3,y+4,r.z2+1,B.Lantern);
+    const district:DistrictId=s.id==="amber-village"?"market":s.id==="willow-tulou"?"hutong":s.id==="lotus-causeway"?"scholar":s.id==="li-stone-walk"?"water-town":"highland";
+    const r=b.bounds,spec=districtSpec(district),lot:UrbanLot={...r,id:`region10:${s.id}:${r.x1}:${r.z1}`,district:spec.legacy,districtId:district,blockId:s.id,kind:"shophouse",archetype:"shophouse",roofFamily:"hip",facade:"timber",facing:2,floors:b.floors,roof:b.roof,style:0,seed:m.seed,baseY:b.level,entrance:{x:Math.floor((r.x1+r.x2)/2),z:r.z2+1},envelope:{x1:r.x1-1,x2:r.x2+1,z1:r.z1-1,z2:r.z2+1},balcony:false,arcade:false,corner:false,greenery:false};
+    const base:BuildingDesign={family:`${district}-village`,massing:"street-bar",roof:"hip",floors:b.floors,upper:Math.max(1,b.floors-1),bay:4,wall:b.wall,tile:b.roof,accent:spec.accent,recess:0,sign:1,balcony:b.floors>1,seed:m.seed};
+    const design=richDesign(lot,base,m.seed),assembly=planRichBuilding(lot,design);
+    clipped(w,r,(x,z)=>foundation(w,m,x,z,b.level,B.Planks,design.floors*5+12));
+    drawRichLot(w,lot,design,assembly);
   }
 }
 function tulou(w:VoxelWriter,m:MacroPlan,s:RegionalSite) {
