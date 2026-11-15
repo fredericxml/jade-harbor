@@ -1,0 +1,46 @@
+{
+  "version": "2.1.0",
+  "id": "5b96357cb00981688b4222a6",
+  "files": [
+    {
+      "path": "assets/generation.worker-CfFa6zED.js",
+      "sha256": "aed05e7e9b0250e1fb8f7c5ddc415bd73db6589018ca82567312709a83379147"
+    },
+    {
+      "path": "assets/index-BJuyhtei.js",
+      "sha256": "fcd5fb2c5c7a388698b06d8156c78d791d749c998dfac765d766205b0bc6866e"
+    },
+    {
+      "path": "assets/index-zEa3qndA.css",
+      "sha256": "5ea6ef19ec8de5d2df53745e85eb677ff1b3ec30f4c69bcd7aecd035e32d948a"
+    },
+    {
+      "path": "favicon.svg",
+      "sha256": "85b6510f5ba8f401981421e2a74edb74b0461afa4acb9ac9c95c9c18e1d984a9"
+    },
+    {
+      "path": "icons/app-192.png",
+      "sha256": "7ebb30070b0a289bf8a7a4190e8c67a5efcd890803ecd1e41c55e1adca2efc9c"
+    },
+    {
+      "path": "icons/app-512.png",
+      "sha256": "ce186014e84cdab05ea4716b0b7605ee506c8df6a46f93bb2d82d2b3e6315af7"
+    },
+    {
+      "path": "icons/apple-touch-180.png",
+      "sha256": "7bfd6aa5961e788f7e62b1f69de828c8c06fddbbc96804cae16cb181abb5f74b"
+    },
+    {
+      "path": "icons/maskable-512.png",
+      "sha256": "d93408d236843831ca71d4f16f4bb0cc5f7f260fbffcc5bbf061de5d8e29560c"
+    },
+    {
+      "path": "index.html",
+      "sha256": "a552edef57b10fa678c6273a1c69be31d7bc4043268791337ab608d9940a37d6"
+    },
+    {
+      "path": "manifest.webmanifest",
+      "sha256": "eb4758845aa2b1203b59db634bda725a130e8abd7474653c345acdb01a0c2018"
+    }
+  ]
+}
